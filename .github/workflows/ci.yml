@@ -120,3 +120,44 @@ jobs:
           else
             echo "No typecheck script — skipping."
           fi
+
+      - name: Generate coverage (for the SonarCloud workflow)
+        if: steps.detect.outputs.has_app == 'true' && github.event_name == 'pull_request'
+        run: |
+          if node -e "process.exit(require('./package.json').scripts?.['test:coverage'] ? 0 : 1)"; then
+            ${{ steps.pm.outputs.pm }} run test:coverage
+          else
+            echo "No test:coverage script — skipping (Sonar reports 0% new-code coverage)."
+          fi
+
+      - name: Package Sonar payload
+        # This job runs on plain `pull_request` — no secrets, so it's safe to
+        # run PR-authored code here (already did, above). The privileged
+        # SonarCloud workflow (has SONAR_TOKEN, triggered by `workflow_run` on
+        # THIS workflow's completion — see ima-jin/dykil#4) never checks out
+        # or executes PR code itself; it only downloads this pre-built,
+        # already-safe snapshot. That split is what keeps a fork PR's
+        # SONAR_TOKEN-holding job free of the classic "checkout of untrusted
+        # code in a privileged context" vulnerability (flagged by CodeQL on
+        # an earlier version of this fix that checked out the PR head
+        # directly from a pull_request_target-triggered job).
+        if: github.event_name == 'pull_request'
+        run: |
+          mkdir -p /tmp/sonar-payload
+          rsync -a --exclude='.git' --exclude='node_modules' --exclude='.next' --exclude='.imajin' ./ /tmp/sonar-payload/
+          cat > /tmp/sonar-payload/.sonar-pr-meta.json <<JSON
+          {
+            "prNumber": ${{ github.event.pull_request.number }},
+            "headSha": "${{ github.event.pull_request.head.sha }}",
+            "headRef": "${{ github.event.pull_request.head.ref }}",
+            "baseRef": "${{ github.event.pull_request.base.ref }}"
+          }
+          JSON
+
+      - name: Upload Sonar payload
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonar-payload
+          path: /tmp/sonar-payload
+          retention-days: 1
