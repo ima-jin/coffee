@@ -14,11 +14,30 @@ name: SonarCloud
 #   2. Add SONAR_TOKEN as a repo or org secret.
 # Until both exist, this check fails on purpose. A green check that scanned
 # nothing is a worse signal than a red one that says why.
+#
+# Fork-PR fix (ima-jin/dykil#4): a plain `pull_request` trigger never sees
+# repo/org secrets when the PR comes from a fork, so SONAR_TOKEN would be
+# empty and this job would always fail on fork PRs — and fork-and-PR is the
+# standard contribution path here, including for Jin. `pull_request_target`
+# runs in the BASE repo's context instead, so secrets are available, but it
+# is the classic pull_request_target + untrusted-code footgun if misused: the
+# checkout below pins the PR's own head SHA explicitly (the event's default
+# ref is the base branch, not the PR), and on that trigger this job is kept
+# to checkout + the Sonar scanner ONLY — no install/build/test of PR-authored
+# code runs in this privileged context. Coverage generation (`pnpm run
+# test:coverage`) still runs PR code, so it only runs on `push` (already
+# base-repo code, not attacker-controlled); a fork PR's Sonar run reports
+# 0% new-code coverage, which is harmless here (see the Generate coverage
+# step below) — the full picture reappears once the PR lands on main.
 
 on:
   push:
     branches: [main]
-  pull_request:
+  pull_request_target:
+
+permissions:
+  contents: read
+  pull-requests: write
 
 jobs:
   sonarcloud:
@@ -29,6 +48,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # On pull_request_target, check out the PR's own head commit —
+          # never the default (base-branch) ref — so the scanner analyzes
+          # what the PR actually changes.
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.ref }}
           # Full history so the scanner can assign blame and compute new-code accurately.
           fetch-depth: 0
 
@@ -43,28 +66,32 @@ jobs:
           fi
 
       - name: Setup pnpm
-        if: steps.detect.outputs.has_app == 'true'
+        if: steps.detect.outputs.has_app == 'true' && github.event_name == 'push'
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Setup Node
-        if: steps.detect.outputs.has_app == 'true'
+        if: steps.detect.outputs.has_app == 'true' && github.event_name == 'push'
         uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: pnpm
 
       - name: Install dependencies
-        if: steps.detect.outputs.has_app == 'true'
-        # --ignore-scripts: this job only needs to run the test suite for
-        # coverage, not build native addons — no lifecycle script here is
-        # required for `pnpm run test:coverage` to succeed (verified locally).
+        # Only on push — see the fork-PR fix note above. --ignore-scripts:
+        # this job only needs to run the test suite for coverage, not build
+        # native addons — no lifecycle script here is required for
+        # `pnpm run test:coverage` to succeed (verified locally).
+        if: steps.detect.outputs.has_app == 'true' && github.event_name == 'push'
         run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Generate coverage
-        # Populates coverage/lcov.info (sonar.javascript.lcov.reportPaths). A
-        # failing suite short-circuits the scan, which is fine — the gate
-        # would be judging an incomplete picture anyway.
-        if: steps.detect.outputs.has_app == 'true'
+        # Populates coverage/lcov.info (sonar.javascript.lcov.reportPaths).
+        # Only on push — see the fork-PR fix note above; a pull_request_target
+        # run has no coverage report, which Sonar treats as 0% new-code
+        # coverage rather than a scan failure. A failing suite short-circuits
+        # the scan, which is fine — the gate would be judging an incomplete
+        # picture anyway.
+        if: steps.detect.outputs.has_app == 'true' && github.event_name == 'push'
         run: |
           if node -e "process.exit(require('./package.json').scripts?.['test:coverage'] ? 0 : 1)"; then
             pnpm run test:coverage

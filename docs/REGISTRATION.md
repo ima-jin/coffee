@@ -40,9 +40,10 @@ Response (`201`):
 ```
 
 `keypair` is only present when you didn't supply your own `publicKey` — it is shown **once** and
-never stored by the kernel. This template's session flow (`@ima-jin/auth-client`) doesn't need
-your private key at all; keep it somewhere safe anyway in case you later adopt app-level signing
-(scoped app-tokens, attestation emission) — never commit it.
+never stored by the kernel. **Do not put `keypair.privateKey` in `.env` or anywhere in this repo.**
+This template never reads a raw private key from env at all (`instrumentation.ts` fails loud at
+boot if `IMAJIN_APP_PRIVATE_KEY` is set) — see "Fetch this app's own signing key at boot" below for
+how this app actually obtains its signing key.
 
 ## 2. Fields, and what they mean for a fork
 
@@ -68,12 +69,34 @@ cp .env.example .env.local
 #   SESSION_SECRET=$(openssl rand -hex 32)
 #   APP_DB_SCHEMA=<a name for this app's own Postgres schema — see docs/MIGRATIONS.md>
 #   DATABASE_URL=<this app's own Postgres connection string>
+#   IMAJIN_KERNEL_URL=<same host as IMAJIN_AUTH_URL above>
+#   IMAJIN_APP_CLAIM_CODE=<one-time code from the kernel operator's /jin approval card — first boot only>
 ```
 
-Without `IMAJIN_APP_DID` set, `pnpm dev` / `pnpm start` throw immediately (`instrumentation.ts`)
-instead of serving requests no kernel call could ever authenticate.
+Without `IMAJIN_APP_DID` set, or with a raw `IMAJIN_APP_PRIVATE_KEY` still set, `pnpm dev` /
+`pnpm start` throw immediately (`instrumentation.ts`) instead of serving requests no kernel call
+could ever authenticate.
 
-## 4. List or manage your apps later
+## 4. Fetch this app's own signing key at boot (#7)
+
+This app never reads a raw private key out of `.env`. Instead, `instrumentation.ts` calls
+`@ima-jin/auth-client`'s `loadAppSigningKey()` once, before serving any request:
+
+- **First boot** (no local keystore yet): spends the one-time `IMAJIN_APP_CLAIM_CODE` from the
+  kernel operator's `/jin` approval card, together with a freshly minted Ed25519 "bootstrap"
+  keypair, to fetch the real signing key. The bootstrap keypair — never the signing key — is then
+  persisted in a local keystore file (`IMAJIN_APP_KEYSTORE`, default `./.imajin/keystore.json`,
+  mode `0600`). Delete `IMAJIN_APP_CLAIM_CODE` from `.env.local` once this succeeds; it's spent.
+- **Every later boot**: signs a fresh challenge with the persisted bootstrap key and fetches the
+  signing key again — no claim code needed, no operator action required for an ordinary restart.
+- **No keystore and no claim code**: `loadAppSigningKey()` throws immediately with a clear error
+  instead of booting unsigned.
+
+If the local keystore is ever lost (disk wipe, redeploy to a fresh host), ask the kernel operator
+to re-approve `apps.provision` with `reissueClaim: true` for a fresh claim code — redeeming it also
+revokes the lost keystore's bootstrap key. See `@ima-jin/auth-client`'s README for the full API.
+
+## 5. List or manage your apps later
 
 ```bash
 curl "${IMAJIN_AUTH_URL}/api/registry/apps?owner=me" \

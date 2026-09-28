@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@ima-jin/auth-client':
-        specifier: ^0.6.1
-        version: 0.6.1(next@15.5.26(@types/node@20.19.43)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))
+        specifier: ^0.8.8
+        version: 0.8.8(next@15.5.26(@types/node@20.19.43)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))
       drizzle-orm:
         specifier: ^0.45.1
         version: 0.45.3(postgres@3.4.9)
@@ -760,10 +760,10 @@ packages:
     resolution: {integrity: sha512-bV0Tgo9K4hfPCek+aMAn81RppFKv2ySDQeMoSZuvTASywNTnVJCArCZE2FWqpvIatKu7VMRLWlR1EazvVhDyhQ==}
     engines: {node: '>=18.18'}
 
-  '@ima-jin/auth-client@0.6.1':
-    resolution: {integrity: sha512-7eYrgk5Pom3muA77cjMgYYg8d08l41i//MoPi+FfBMH/rlq+CMXD/3PzrISHAThhegoFyMkeAa/uug/ZcIy2gA==}
+  '@ima-jin/auth-client@0.8.8':
+    resolution: {integrity: sha512-pSfYzj/D4lFaTPjLMGfYz6UKY1LsmGl1B6QuXvMjuJ8XXxACjsWEEp4bolXAp6gGoyl//L/psVrcTZGRa8jZBw==}
     peerDependencies:
-      next: '>=14'
+      next: '>=15.5.24'
 
   '@img/colour@1.1.0':
     resolution: {integrity: sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ==}
@@ -998,6 +998,13 @@ packages:
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [win32]
+
+  '@noble/ed25519@2.3.0':
+    resolution: {integrity: sha512-M7dvXL2B92/M7dw9+gzuydL8qn/jiqNHaoR3Q+cb1q1GHV7uwE17WCyFMG+Y+TZb5izcaXk5TdJRrDUxHXL78A==}
+
+  '@noble/hashes@1.8.0':
+    resolution: {integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==}
+    engines: {node: ^14.21.3 || >=16}
 
   '@nodelib/fs.scandir@2.1.5':
     resolution: {integrity: sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g==}
@@ -3468,8 +3475,10 @@ snapshots:
 
   '@humanwhocodes/retry@0.4.3': {}
 
-  '@ima-jin/auth-client@0.6.1(next@15.5.26(@types/node@20.19.43)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))':
+  '@ima-jin/auth-client@0.8.8(next@15.5.26(@types/node@20.19.43)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))':
     dependencies:
+      '@noble/ed25519': 2.3.0
+      '@noble/hashes': 1.8.0
       jose: 5.10.0
       next: 15.5.26(@types/node@20.19.43)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
 
@@ -3644,6 +3653,10 @@ snapshots:
 
   '@next/swc-win32-x64-msvc@15.5.26':
     optional: true
+
+  '@noble/ed25519@2.3.0': {}
+
+  '@noble/hashes@1.8.0': {}
 
   '@nodelib/fs.scandir@2.1.5':
     dependencies:
