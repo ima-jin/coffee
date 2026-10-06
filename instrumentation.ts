@@ -1,5 +1,3 @@
-import { bootstrapSigningIdentity } from '@/lib/signing-identity';
-
 /**
  * Next.js instrumentation hook (stable since Next 15) — runs once when the
  * server process starts, before it serves any request. Not invoked by
@@ -31,10 +29,12 @@ export function validateSigningKeyBootEnv(): void {
 }
 
 export async function register(): Promise<void> {
-  if (process.env.NEXT_RUNTIME !== 'nodejs') {
-    return;
+  // The NEXT_RUNTIME check must wrap the node-only import (not early-return):
+  // with a middleware.ts present Next also compiles this file for the edge
+  // runtime, and only this shape lets it drop the keystore's node:fs/crypto code.
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    validateSigningKeyBootEnv();
+    const { bootstrapSigningIdentity } = await import('@/lib/signing-identity');
+    await bootstrapSigningIdentity();
   }
-
-  validateSigningKeyBootEnv();
-  await bootstrapSigningIdentity();
 }

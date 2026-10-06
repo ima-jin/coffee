@@ -1,13 +1,12 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import { ToastProvider } from '@ima-jin/ui';
 
 /**
- * Extension point for client-side context providers (theme, query client,
- * feature flags, ...). Empty by design in the bare template — a fork adds
- * providers here rather than editing `layout.tsx` directly, so future
- * `scripts/sync-from-template.sh` merges stay conflict-free.
+ * Client-side context providers. Coffee's tip form reports payment-method
+ * hints through `useToast`, so the toast provider wraps the whole app.
  */
 export function Providers({ children }: Readonly<{ children: ReactNode }>) {
-  return <>{children}</>;
+  return <ToastProvider>{children}</ToastProvider>;
 }

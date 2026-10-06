@@ -15,7 +15,7 @@ export default defineConfig({
     environment: 'node',
     // src/db/schema.ts requires APP_DB_SCHEMA at import time (see docs/MIGRATIONS.md).
     env: { APP_DB_SCHEMA: 'coffee' },
-    include: ['**/__tests__/**/*.test.ts'],
+    include: ['**/__tests__/**/*.test.{ts,tsx}'],
     exclude: ['node_modules/**', '.next/**'],
     server: {
       // Otherwise vitest hands @ima-jin/auth-client's ESM import of
