@@ -44,14 +44,14 @@ describe('readJournalTags', () => {
 describe('checkAppMigrations', () => {
   it('reports no pending migrations when drizzle has applied them all', async () => {
     writeJournal(['0000_a', '0001_b']);
-    mocks.executeMock.mockResolvedValueOnce([{ reg: 'drizzle.__drizzle_migrations' }]).mockResolvedValueOnce([{ count: '2' }]);
+    mocks.executeMock.mockResolvedValueOnce([{ reg: 'coffee.__drizzle_migrations' }]).mockResolvedValueOnce([{ count: '2' }]);
 
     expect(await checkAppMigrations()).toEqual({ migrationHead: '0001_b', appliedCount: 2, pendingCount: 0 });
   });
 
   it('counts committed-but-unapplied migrations as pending', async () => {
     writeJournal(['0000_a', '0001_b']);
-    mocks.executeMock.mockResolvedValueOnce([{ reg: 'drizzle.__drizzle_migrations' }]).mockResolvedValueOnce([{ count: '1' }]);
+    mocks.executeMock.mockResolvedValueOnce([{ reg: 'coffee.__drizzle_migrations' }]).mockResolvedValueOnce([{ count: '1' }]);
 
     expect(await checkAppMigrations()).toEqual({ migrationHead: '0001_b', appliedCount: 1, pendingCount: 1 });
   });
