@@ -39,8 +39,14 @@ lives at `coffee.__drizzle_migrations` (`migrations` in `drizzle.config.ts`) —
 `drizzle.config.ts` refuses to run unless `APP_DB_SCHEMA=coffee`, so the schema file, the config's
 `schemaFilter: ['coffee']`, and the committed SQL can't drift apart.
 
-Moving existing rows from the kernel's `coffee.*` tables into this app's database is a separate step —
-this repo only owns the empty schema.
+## Existing prod/dev databases: the baseline
+
+Prod and dev already hold a `coffee` schema with real data, created by the kernel monorepo's shared seed migration,
+in the same database this app now connects to. Nothing is moved: `scripts/migrate-baseline.mjs` verifies the live
+schema matches `migrations/0000_*.sql` and records 0000 as applied in `coffee.__drizzle_migrations`, so
+`pnpm db:migrate` then only runs newer migrations. It is idempotent, refuses (exit 1) on any mismatch, and never
+drops, truncates or alters anything. `scripts/deploy.sh` runs it before every migrate. Details and exit codes:
+[`DEPLOY.md`](./DEPLOY.md#migration-baseline).
 
 ## Workflow
 

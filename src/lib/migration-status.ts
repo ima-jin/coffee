@@ -27,13 +27,17 @@ export function readJournalTags(migrationsDir = join(process.cwd(), 'migrations'
   return (journal.entries ?? []).map((entry) => entry.tag);
 }
 
-/** Rows in drizzle-kit's own `drizzle.__drizzle_migrations` table; none if it doesn't exist yet. */
+/**
+ * Rows in drizzle's tracking table; none if it doesn't exist yet. It lives inside this app's own
+ * schema (`migrations.schema` in drizzle.config.ts), where both `pnpm db:migrate` and
+ * `scripts/migrate-baseline.mjs` record applied migrations.
+ */
 async function countAppliedMigrations(): Promise<number> {
   const existence = await db.execute<{ reg: string | null }>(
-    sql`SELECT to_regclass('drizzle.__drizzle_migrations') AS reg`,
+    sql`SELECT to_regclass('coffee.__drizzle_migrations') AS reg`,
   );
   if (!existence[0]?.reg) return 0;
-  const rows = await db.execute<{ count: string }>(sql`SELECT count(*) AS count FROM drizzle.__drizzle_migrations`);
+  const rows = await db.execute<{ count: string }>(sql`SELECT count(*) AS count FROM coffee.__drizzle_migrations`);
   return Number(rows[0]?.count ?? 0);
 }
 

@@ -50,6 +50,44 @@ The kernel verifies both and returns `{ appDid, userDid, scopes }` — that trip
    `/api/health` and `/api/spec` should respond immediately; `/api/me` returns your DID once
    you sign in through the header's "Sign in with Imajin" link.
 
+## Identity
+
+Each deployment (dev, prod) is its own app identity — its own DID, keystore and claim code — minted through
+the kernel's claim flow. Nothing is hand-made, and no key material ever lands in the repo, the env file or the logs.
+
+1. **Register the app** with the kernel and note the returned `appDid` and registry `id`
+   ([`docs/REGISTRATION.md`](./docs/REGISTRATION.md) §1–2). Set `IMAJIN_APP_DID` and `NEXT_PUBLIC_IMAJIN_APP_ID`
+   in the target's `.env.local`.
+2. **Mint a claim code** (operator step, on the kernel): open the `apps.provision` approval card on `/jin` for this
+   app and approve it. It yields a **one-time claim code**. Use `reissueClaim: true` to get a fresh one after a
+   lost keystore.
+3. **Spend it on first boot.** Put the code in `.env.local` as `IMAJIN_APP_CLAIM_CODE` and start the app (the
+   normal [deploy](#deploy) does this). `instrumentation.ts` calls `@ima-jin/auth-client`'s `loadAppSigningKey()`,
+   which redeems the code together with a freshly minted bootstrap keypair, and persists only that bootstrap
+   keypair in the `0600` keystore (`IMAJIN_APP_KEYSTORE`). The signing key itself is memory-only.
+4. **Delete `IMAJIN_APP_CLAIM_CODE`** from `.env.local` once the app is up — it is spent. Every later boot
+   re-authenticates with the keystore alone, so ordinary restarts need no operator action.
+
+> **No `/claim` page yet.** Coffee does not (yet) have the operator `/claim` page that `ima-jin/links` and
+> `ima-jin/dykil` ship (links#4, dykil#7), where the code is pasted into the running app instead of the env file.
+> Until that is ported, the claim code is spent from `IMAJIN_APP_CLAIM_CODE` at boot as described above — the same
+> kernel claim flow, minus the page. See `docs/DEPLOY.md`.
+
+## Deploy
+
+Coffee runs as its own pm2 process on the kernel host (`prod-coffee` :7100, `dev-coffee` :3100) behind the
+unchanged Caddy `/coffee` route. From the target's checkout (`~/prod/coffee` or `~/dev/coffee`) on the server:
+
+```bash
+scripts/deploy.sh dev    # or: scripts/deploy.sh prod   (add --dry-run to print the plan, --ref <tag> to pin/rollback)
+```
+
+It checks out the ref, validates `.env.local` (`scripts/check-env.mjs`), installs, builds, runs the idempotent
+[migration baseline](./docs/DEPLOY.md#migration-baseline) + `drizzle-kit migrate`, reloads pm2, and gates on
+`/coffee/api/health`. First-deploy steps, the Caddy snippet, the cutover checklist and rollback are in
+[`docs/DEPLOY.md`](./docs/DEPLOY.md); every environment variable is documented in
+[`docs/ENVIRONMENTS.md`](./docs/ENVIRONMENTS.md) (`.env.example`, `.env.dev.example`, `.env.prod.example`).
+
 ## Consuming `@ima-jin/*`
 
 Published `@ima-jin/*` packages (e.g. `@ima-jin/auth-client`, `@ima-jin/config`, `@ima-jin/ui`) are served from
@@ -68,6 +106,10 @@ docs/
   ARCHITECTURE.md  ← design notes
   REGISTRATION.md  ← how to register this app with the kernel
   MIGRATIONS.md    ← this app's schema-ownership rule
+  DEPLOY.md        ← deploy runbook: one command, baseline, pm2, Caddy, cutover
+  ENVIRONMENTS.md  ← every env var, dev vs prod
+scripts/           ← deploy.sh, check-env.mjs, migrate-baseline.mjs (+ tests)
+ecosystem.config.cjs ← pm2 entries: prod-coffee (7100), dev-coffee (3100)
 app/               ← Next.js App Router: pages + API routes
 src/
   components/      ← client components
