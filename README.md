@@ -28,7 +28,8 @@ The kernel verifies both and returns `{ appDid, userDid, scopes }` — that trip
 
 ## Getting started
 
-1. **Use this template** (GitHub's "Use this template" button, or `git clone` + a new remote).
+1. **Create your app repo WITH template history** — clone + rename, **not** GitHub's "Use this template" button
+   (see [Creating a new app](#creating-a-new-app-with-template-history) below).
 2. **Register this app with the kernel** — see [`docs/REGISTRATION.md`](./docs/REGISTRATION.md).
    You'll get back this app's `appDid` and registry `id`.
 3. **Set env**: `cp .env.example .env.local`, then fill in `IMAJIN_APP_DID`,
@@ -50,6 +51,58 @@ The kernel verifies both and returns `{ appDid, userDid, scopes }` — that trip
    ```
    `/api/health` and `/api/spec` should respond immediately; `/api/me` returns your DID once
    you sign in through the header's "Sign in with Imajin" link.
+
+## Creating a new app (with template history)
+
+> **Do not use GitHub's "Use this template" button.** It creates a repo with a brand-new, unrelated root
+> commit. Such an app can never merge template changes cleanly — its first sync is an
+> `--allow-unrelated-histories` merge with add/add conflicts on nearly every file (that's why `/claim` had to be
+> hand-ported into `links` and `dykil`). Instead, keep the template's history as the app's ancestry:
+
+```bash
+# 1. Clone the template under your app's name; the template becomes the `template` remote.
+git clone https://github.com/ima-jin/imajin-app-template.git <app-name>
+cd <app-name>
+git remote rename origin template
+
+# 2. Create the (empty) app repo on GitHub and make it `origin`. No README/license/.gitignore — it must be empty.
+gh repo create ima-jin/<app-name> --private --source=. --remote=origin --push
+
+# 3. Rename the template identity (one commit), then push.
+#    package.json "name", api-spec/openapi.yaml (title + example), app/api/health/route.ts (+ its test),
+#    app/layout.tsx description, sonar-project.properties (projectKey), the README title, and AGENTS.md §8.
+git checkout -b chore/rename-app
+# ...edit the files above...
+git commit -am "chore: rename template → <app-name>" && git push -u origin chore/rename-app
+```
+
+Because the app was cloned from the template, `git merge-base HEAD template/main` finds a common ancestor from
+the very first commit — there is nothing to "join".
+
+### Pulling template changes later
+
+```bash
+scripts/sync-from-template.sh --check   # list pending template commits; no merge, no branch
+scripts/sync-from-template.sh           # merge template/main onto chore/sync-from-template → open a PR
+```
+
+The script adds the `template` remote if missing, fetches `template/main`, and checks for a common ancestor:
+
+- **Histories joined** → prints `histories already joined; incremental merge` and runs a normal
+  `git merge template/main --no-edit` on a `chore/sync-from-template` branch (never straight to `main`).
+- **Not joined** (app created with "Use this template") → exits with status 2 and prints the one-time join. The
+  join is history-only — it changes **no files**:
+  ```bash
+  git checkout -b chore/join-template-history
+  git merge -s ours --allow-unrelated-histories <template-sha> -m "chore: join template history (one-time)"
+  ```
+  Use the template commit the app was **generated from** (the template's state when the app repo was created),
+  not `template/main`: `-s ours` marks everything up to that commit as already merged, so joining at the tip
+  would silently skip every template change since the app was created. After the join PR merges, the script
+  reports `histories already joined` and pulls later template changes as an ordinary merge.
+
+On a conflict (almost always AGENTS.md §8, or the renamed identity files from step 3), keep your version of
+what is yours and take the template's side of the shared contract.
 
 ## Consuming `@ima-jin/*`
 
