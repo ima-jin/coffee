@@ -52,7 +52,7 @@ const routes: Route[] = findRouteFiles(API_DIR)
     const source = readFileSync(join(API_DIR, rel), 'utf-8');
     const urlPath = `/api/${rel.slice(0, -'/route.ts'.length)}`.replaceAll(sep, '/').replaceAll(/\[(\w+)\]/g, '{$1}');
     const methods = METHODS.filter((method) =>
-      new RegExp(String.raw`export (async function|const) ${method}\b`).test(source),
+      new RegExp(String.raw`export (async function|function|const) ${method}\b`).test(source),
     );
     return { path: urlPath, file: rel, source, methods };
   });
@@ -77,6 +77,7 @@ describe('api-spec/openapi.yaml', () => {
   it('discovers the ported route handlers', () => {
     expect(routes.map((r) => r.path).sort()).toEqual([
       '/api/checkout',
+      '/api/claim',
       '/api/health',
       '/api/me',
       '/api/pages',
@@ -121,7 +122,7 @@ describe('api-spec/openapi.yaml', () => {
       const op = spec.paths[path][method.toLowerCase()];
       const schemes = (op.security ?? []).flatMap((requirement) => Object.keys(requirement));
       const handler = source.slice(source.indexOf(`function ${method}`));
-      const nextHandler = handler.slice(1).search(/export (async function|const) (GET|POST|PUT|DELETE)\b/);
+      const nextHandler = handler.slice(1).search(/export (async function|function|const) (GET|POST|PUT|DELETE)\b/);
       const body = nextHandler === -1 ? handler : handler.slice(0, nextHandler + 1);
 
       if (/\bauthenticate\(/.test(body)) {
