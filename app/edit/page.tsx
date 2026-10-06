@@ -92,7 +92,7 @@ export default function EditPage() {
       }
     }
 
-    loadPage();
+    void loadPage();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
