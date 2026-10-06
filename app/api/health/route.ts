@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { isAppClaimed } from '@/lib/signing-identity';
 import { checkAppMigrations, hasPendingMigrations } from '@/lib/migration-status';
 
 export const dynamic = 'force-dynamic';
@@ -17,5 +18,8 @@ export async function GET() {
     build: process.env.NEXT_PUBLIC_BUILD_HASH || 'dev',
     timestamp: new Date().toISOString(),
     migrations,
+    // Unclaimed boot mode (#2427): false until an operator pastes a claim
+    // code at /claim (or IMAJIN_APP_CLAIM_CODE resolves it at boot).
+    claimed: isAppClaimed(),
   });
 }

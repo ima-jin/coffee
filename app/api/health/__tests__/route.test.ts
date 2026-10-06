@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({ checkAppMigrationsMock: vi.fn() }));
 
@@ -8,6 +8,7 @@ vi.mock('@/lib/migration-status', () => ({
     m != null && m.pendingCount !== null && m.pendingCount > 0,
 }));
 
+import { resetSigningIdentityForTests } from '@/lib/signing-identity';
 import { GET } from '../route';
 
 beforeEach(() => {
@@ -15,8 +16,12 @@ beforeEach(() => {
   vi.unstubAllEnvs();
 });
 
+afterEach(() => {
+  resetSigningIdentityForTests();
+});
+
 describe('GET /api/health', () => {
-  it('reports ok with this app’s own migration state', async () => {
+  it('reports ok with this app’s own migration state, and claimed:false before this app has claimed a signing identity', async () => {
     const migrations = { migrationHead: '0000_coffee_schema', appliedCount: 1, pendingCount: 0 };
     mocks.checkAppMigrationsMock.mockResolvedValue(migrations);
 
@@ -24,7 +29,7 @@ describe('GET /api/health', () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toMatchObject({ status: 'ok', service: 'coffee', version: '0.0.0', build: 'dev', migrations });
+    expect(body).toMatchObject({ status: 'ok', service: 'coffee', version: '0.0.0', build: 'dev', migrations, claimed: false });
     expect(typeof body.timestamp).toBe('string');
   });
 
