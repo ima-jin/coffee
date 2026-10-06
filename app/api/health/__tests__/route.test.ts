@@ -7,7 +7,7 @@ describe('GET /api/health', () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toMatchObject({ status: 'ok', service: 'imajin-app-template' });
+    expect(body).toMatchObject({ status: 'ok', service: 'coffee' });
     expect(typeof body.timestamp).toBe('string');
   });
 });

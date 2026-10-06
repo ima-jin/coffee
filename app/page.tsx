@@ -3,11 +3,11 @@ import { withBasePath } from '@/lib/base-path';
 export default function HomePage() {
   return (
     <div className="mx-auto max-w-2xl px-4 py-12">
-      <h1 className="text-2xl font-semibold text-white">Imajin App Template</h1>
+      <h1 className="text-2xl font-semibold text-white">Coffee</h1>
       <p className="mt-4 text-gray-400">
-        A working, forkable Next.js app that composes the Imajin platform through its public
-        app surface only. See <code>AGENTS.md</code> and <code>docs/</code> before building on
-        this template.
+        Tip pages that compose the Imajin platform through its public
+        app surface only. See <code>AGENTS.md</code> and <code>docs/</code> for the boundary
+        contract.
       </p>
       <ul className="mt-6 space-y-2 text-sm">
         <li>

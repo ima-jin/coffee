@@ -5,8 +5,8 @@ import { Providers } from './providers';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Imajin App Template',
-  description: 'A third-party app on Imajin — forked from ima-jin/imajin-app-template.',
+  title: 'Coffee',
+  description: 'Coffee — tip pages, a third-party app on Imajin.',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
@@ -15,7 +15,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
       <body>
         <Providers>
           <header className="flex items-center justify-between border-b border-gray-800/50 bg-gray-950/90 px-4 py-2 backdrop-blur">
-            <span className="text-sm font-semibold text-white">Imajin App Template</span>
+            <span className="text-sm font-semibold text-white">Coffee</span>
             <ImajinAuthStatus />
           </header>
           <main>{children}</main>

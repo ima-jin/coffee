@@ -40,6 +40,24 @@ jobs:
   test-build:
     name: Test + build
     runs-on: ubuntu-latest
+    env:
+      # This app's own Postgres schema (docs/MIGRATIONS.md) and a throwaway CI database.
+      APP_DB_SCHEMA: coffee
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/coffee_ci
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/coffee_ci
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: coffee_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -84,6 +102,25 @@ jobs:
             yarn) yarn install --frozen-lockfile ;;
             npm)  npm ci ;;
           esac
+
+      - name: Migration drift check
+        # Fails when src/db/schema.ts has changes with no committed migration.
+        if: steps.detect.outputs.has_app == 'true'
+        run: |
+          ${{ steps.pm.outputs.pm }} run db:generate
+          if [ -n "$(git status --porcelain -- migrations)" ]; then
+            echo "::error::src/db/schema.ts has changes without a committed migration — run 'pnpm db:generate' and commit migrations/."
+            git status --porcelain -- migrations
+            exit 1
+          fi
+
+      - name: Run migrations (creates the coffee schema and its tables)
+        if: steps.detect.outputs.has_app == 'true'
+        run: ${{ steps.pm.outputs.pm }} run db:migrate
+
+      - name: Re-run migrations (must be idempotent)
+        if: steps.detect.outputs.has_app == 'true'
+        run: ${{ steps.pm.outputs.pm }} run db:migrate
 
       - name: Test
         if: steps.detect.outputs.has_app == 'true'
@@ -161,3 +198,6 @@ jobs:
           name: sonar-payload
           path: /tmp/sonar-payload
           retention-days: 1
+          # .sonar-pr-meta.json is a dotfile — upload-artifact@v4 skips hidden files by default,
+          # which made the SonarCloud workflow run with empty -Dsonar.pullrequest.* args.
+          include-hidden-files: true
