@@ -1,6 +1,6 @@
 openapi: "3.1.0"
 info:
-  title: imajin-app-template
+  title: coffee
   version: "0.1.0"
   description: >
     A third-party app on Imajin. This spec is served by the app itself at
@@ -12,7 +12,7 @@ servers:
     description: local
 
 tags:
-  - name: app-template
+  - name: coffee
 
 components:
   securitySchemes:
@@ -32,7 +32,7 @@ paths:
     get:
       operationId: getHealth
       summary: Health check
-      tags: [app-template]
+      tags: [coffee]
       responses:
         "200":
           description: Service is healthy
@@ -42,14 +42,14 @@ paths:
                 type: object
                 properties:
                   status: { type: string, example: ok }
-                  service: { type: string, example: imajin-app-template }
+                  service: { type: string, example: coffee }
                   timestamp: { type: string, format: date-time }
 
   /api/me:
     get:
       operationId: getMe
       summary: Return the signed-in caller's DID
-      tags: [app-template]
+      tags: [coffee]
       security:
         - cookieAuth: []
       responses:

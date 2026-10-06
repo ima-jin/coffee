@@ -24,9 +24,13 @@ if (existsSync(envPath)) {
   }
 }
 
-const appSchemaName = process.env.APP_DB_SCHEMA;
-if (!appSchemaName) {
-  throw new Error('APP_DB_SCHEMA is not set — see .env.example and docs/MIGRATIONS.md.');
+// This app owns exactly one Postgres schema: `coffee`. APP_DB_SCHEMA must be set to it
+// (see .env.example) so src/db/schema.ts and the committed migrations agree.
+const APP_SCHEMA = 'coffee';
+if (process.env.APP_DB_SCHEMA !== APP_SCHEMA) {
+  throw new Error(
+    `APP_DB_SCHEMA must be "${APP_SCHEMA}" (got "${process.env.APP_DB_SCHEMA ?? ''}") — see .env.example and docs/MIGRATIONS.md.`,
+  );
 }
 
 export default defineConfig({
@@ -36,5 +40,11 @@ export default defineConfig({
   dbCredentials: {
     url: process.env.DATABASE_URL!,
   },
-  schemaFilter: [appSchemaName],
+  schemaFilter: ['coffee'],
+  // Keep drizzle's migration-tracking table inside this app's own schema, rather than the
+  // default shared `drizzle` schema — the app never touches a schema it doesn't own.
+  migrations: {
+    schema: 'coffee',
+    table: '__drizzle_migrations',
+  },
 });
