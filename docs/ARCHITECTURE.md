@@ -1,4 +1,4 @@
-# Architecture — &lt;App Name&gt;
+# Architecture — Coffee
 
 > This app is a **lens** over the user's signed records. It owns no authoritative state. See `AGENTS.md` §1–§3.
 
@@ -28,9 +28,59 @@ ship; this convention only fixes the shape (one pm2 entry, one Caddy route) so i
 
 ## The loop this app instruments
 
-_<Describe the real-world loop: who hands what to whom, which single leg is paid (`.fair`), and how the gesture becomes
-a signed record without adding friction.>_
+Supporter → page owner, one paid leg (the tip). A page owner publishes a tip page (`/{handle}`); a supporter picks an
+amount and pays by card (Stripe Checkout via the kernel's pay service) or Solana (direct transfer to the page's
+address). The pay service calls back `POST /api/webhook/payment`; coffee marks the tip completed and asks pay to settle
+the `.fair` split (creator + platform fee).
+
+## Routes (ported from the kernel's `apps/coffee` at parity)
+
+| Route | Auth | Notes |
+|-------|------|-------|
+| `GET /api/health` | none | own migration state from this app's own DB |
+| `GET /api/spec` | none | serves `api-spec/openapi.yaml` |
+| `POST /api/pages` | app token / session | one page per DID; builds the `.fair` manifest from the registry's public node config |
+| `GET /api/pages/mine` | app token / session | the #1974 reference adoption |
+| `GET /api/pages/{handle}` | none | 403 for private pages |
+| `PUT` / `DELETE /api/pages/{handle}` | app token / session | owner only |
+| `POST /api/tip` | optional | anonymous tips allowed; attributed to the caller's DID when authenticated |
+| `POST /api/checkout` | none | page-less support checkout (min $5) |
+| `GET /api/tips/{did}` | app token / session | owner only |
+| `POST /api/webhook/payment` | `WEBHOOK_SECRET` bearer | constant-time compare; called by the pay service |
+
+## Auth: the app-token contract (#1974)
+
+Every authenticated route calls `authenticate()` (`src/lib/auth/authenticate.ts`) and nothing else — no route imports an
+auth primitive directly. It runs `requireSessionOrAppToken` from the published `@ima-jin/auth` with `aud = thisAppHost()`
+(the host of `NEXT_PUBLIC_APP_URL`), so a token minted for another host can never verify here. In order:
+
+1. `Authorization: Bearer <scoped app token>` — minted by the browser (`src/lib/client/app-fetch.ts`) from the user's
+   kernel session via `POST {kernel}/auth/api/tokens/app`, verified against the kernel.
+2. The shared kernel session cookie (migration fallback, same adapter call).
+3. This app's own "Sign in with Imajin" cookie (`@ima-jin/auth-client`'s `getSession`) — what a split-domain deployment
+   actually has.
+
+No coffee-specific scopes are required (the kernel clamps requested scopes to its closed vocabulary).
+`AUTH_SERVICE_URL` (kernel auth service, `/auth` prefix) is what `@ima-jin/auth` reads to verify tokens.
+
+## Behaviour that differs from the kernel version (each tracked as a kernel gap)
+
+- **No bus events.** The kernel published `tip.granted` / `tip.sent` to the in-process bus. The bus is kernel-internal and
+  has no app-callable HTTP surface, so coffee does not emit them — [ima-jin/imajin-ai#2641].
+- **Settlement uses a service key.** `POST {pay}/api/settle` only accepts the shared `PAY_SERVICE_API_KEY`
+  (env only, never committed); settlement is skipped, and logged, when it is unset — [ima-jin/imajin-ai#2642].
+- **No act-as.** App tokens cannot carry a group DID, so the acting identity is always the authenticated DID and the
+  forest scope fee is never applied — [ima-jin/imajin-ai#2644].
+- **Browser token mint is inlined.** `@ima-jin/auth-client` has no browser-safe entry — [ima-jin/imajin-ai#2643].
+- The kernel's `NavBar`/hub chrome is not rendered; this app keeps the template header with "Sign in with Imajin".
+- The kernel's unused `src/lib/email.ts` templates were not ported (nothing called them; `@ima-jin/email` is unpublished).
+
+## Pre-existing quirks preserved on purpose (parity, not endorsement)
+
+- `PUT /api/pages/{handle}` ignores `fundDirections` (the edit form sends it; the kernel route never persisted it).
+- `POST /api/tip` forwards `fundDirection` to pay as metadata but does not store it on the tip row.
 
 ## Open decisions
 
-_<Running list of design decisions still to lock.>_
+- Whether to adopt the `X-App-DID` / `X-App-Authorization` proof-of-possession flow instead of host-scoped session
+  tokens (`authenticate()` is the single seam to change).

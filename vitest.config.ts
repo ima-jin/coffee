@@ -2,6 +2,8 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  // tsconfig keeps `jsx: preserve` for Next; tests compile JSX with the automatic runtime.
+  esbuild: { jsx: 'automatic' },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
@@ -15,13 +17,14 @@ export default defineConfig({
     environment: 'node',
     // src/db/schema.ts requires APP_DB_SCHEMA at import time (see docs/MIGRATIONS.md).
     env: { APP_DB_SCHEMA: 'coffee' },
-    include: ['**/__tests__/**/*.test.ts'],
+    include: ['**/__tests__/**/*.test.{ts,tsx}'],
     exclude: ['node_modules/**', '.next/**'],
     server: {
       // Otherwise vitest hands @ima-jin/auth-client's ESM import of
-      // 'next/headers' straight to Node's own resolver, which bypasses
-      // resolve.alias above and can't find it outside a real Next.js runtime.
-      deps: { inline: ['@ima-jin/auth-client'] },
+      // 'next/headers' (and @ima-jin/config's extensionless import of
+      // 'next/server') straight to Node's own resolver, which bypasses
+      // resolve.alias above and can't find them outside a real Next.js runtime.
+      deps: { inline: ['@ima-jin/auth-client', '@ima-jin/config'] },
     },
     coverage: {
       // lcov is what SonarCloud ingests (sonar.javascript.lcov.reportPaths).
