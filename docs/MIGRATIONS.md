@@ -23,6 +23,25 @@ Concretely, for this app:
 - `APP_DB_SCHEMA` is set once, at registration time, and never changed afterwards. Renaming it
   would orphan every existing migration's tracking state.
 
+## Coffee's schema
+
+`APP_DB_SCHEMA=coffee`. `src/db/schema.ts` defines the two tables ported from the kernel's shared
+migrations (`ima-jin/imajin-ai` `migrations/0001_seed.sql`, `apps/coffee/src/db/schema.ts`):
+
+- `coffee.pages` — tip pages, one per owner DID (`did`, `handle` unique).
+- `coffee.tips` — tip transactions, `page_id` references `coffee.pages(id)`.
+
+`migrations/0000_coffee_schema.sql` creates the `coffee` schema (`CREATE SCHEMA IF NOT EXISTS`, because
+drizzle's migrator creates it first for its tracking table) and both tables. Drizzle's own tracking table
+lives at `coffee.__drizzle_migrations` (`migrations` in `drizzle.config.ts`) — **not** in the default shared
+`drizzle` schema, so this app writes nothing outside `coffee`.
+
+`drizzle.config.ts` refuses to run unless `APP_DB_SCHEMA=coffee`, so the schema file, the config's
+`schemaFilter: ['coffee']`, and the committed SQL can't drift apart.
+
+Moving existing rows from the kernel's `coffee.*` tables into this app's database is a separate step —
+this repo only owns the empty schema.
+
 ## Workflow
 
 ```bash

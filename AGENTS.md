@@ -195,13 +195,14 @@ Full text: `ima-jin/conventions/ISSUE-CONVENTIONS.md`. This §7 is kept in sync 
 
 ## 8. This App (fork fills this in)
 
-> Replace this whole section in the fork. Keep §1–§7 intact.
-
-- **What it is:** _<one-line purpose>_
-- **App DID:** _<did:imajin:…>_
-- **Scopes:** _<e.g. supply:read, supply:write>_
-- **Domain:** _<e.g. app.imajin.ai>_
-- **The real-world loop it instruments:** _<who → who, what changes hands, the one paid leg>_
-- **Domain events it emits (via kernel API):** _<e.g. supply.declared → supply.received>_
-- **Connectors it consumes:** _<e.g. QuickBooks (user self-authorizes)>_
-- **Scope guardrails specific to this app:** _<the "do not build X" list — keep it provable, not comprehensive>_
+- **What it is:** Coffee — tip pages linked to a DID; supporters tip a page owner (Stripe / Solana).
+- **App DID:** _<did:imajin:… — set at registration, see docs/REGISTRATION.md>_
+- **Scopes:** _<set at registration>_
+- **Domain:** _<set at registration>_
+- **Database:** own Postgres schema `coffee` (`APP_DB_SCHEMA=coffee`), tables `pages` and `tips`. Migrations in
+  `migrations/`; see `docs/MIGRATIONS.md`.
+- **The real-world loop it instruments:** supporter → page owner, one paid leg (the tip).
+- **Domain events it emits (via kernel API):** _<not wired yet — later migration steps>_
+- **Connectors it consumes:** _<not wired yet — later migration steps>_
+- **Scope guardrails specific to this app:** no access to kernel schemas or tables; kernel data (identity,
+  profile, media, settlement) only via the kernel's public API and published `@ima-jin/*` packages.
