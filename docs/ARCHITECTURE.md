@@ -31,7 +31,8 @@ ship; this convention only fixes the shape (one pm2 entry, one Caddy route) so i
 Supporter → page owner, one paid leg (the tip). A page owner publishes a tip page (`/{handle}`); a supporter picks an
 amount and pays by card (Stripe Checkout via the kernel's pay service) or Solana (direct transfer to the page's
 address). The pay service calls back `POST /api/webhook/payment`; coffee marks the tip completed and asks pay to settle
-the `.fair` split (creator + platform fee).
+the `.fair` split (creator + platform fee) with its own app-service token. Settlement is idempotent across webhook
+redelivery (`tips.settled_at`, plus the kernel's `alreadySettled`).
 
 ## Routes (ported from the kernel's `apps/coffee` at parity)
 
@@ -67,8 +68,13 @@ No coffee-specific scopes are required (the kernel clamps requested scopes to it
 
 - **No bus events.** The kernel published `tip.granted` / `tip.sent` to the in-process bus. The bus is kernel-internal and
   has no app-callable HTTP surface, so coffee does not emit them — [ima-jin/imajin-ai#2641].
-- **Settlement uses a service key.** `POST {pay}/api/settle` only accepts the shared `PAY_SERVICE_API_KEY`
-  (env only, never committed); settlement is skipped, and logged, when it is unset — [ima-jin/imajin-ai#2642].
+- **Settlement is app-token based.** Coffee mints its own app-service token (`POST {kernel}/auth/api/apps/token/service`,
+  proof of possession with the app key), sends it on `POST {pay}/api/checkout` together with a `payeeManifest` (so
+  `pay.transactions.app_did` is coffee's DID; the returned `transactionId` is stored on the tip), then settles with
+  `POST {pay}/api/settle` `{ transaction_id, fair_manifest: { chain } }` once the webhook confirms payment. The chain
+  posted is the stored payee manifest (the kernel answers 403 on any mismatch); `alreadySettled: true` is success, 409
+  means the payment is not completed yet. Needs the operator-approved `pay:settle` service scope for coffee's app DID —
+  [ima-jin/imajin-ai#2642], [ima-jin/coffee#8].
 - **No act-as.** App tokens cannot carry a group DID, so the acting identity is always the authenticated DID and the
   forest scope fee is never applied — [ima-jin/imajin-ai#2644].
 - **Browser token mint is inlined.** `@ima-jin/auth-client` has no browser-safe entry — [ima-jin/imajin-ai#2643].

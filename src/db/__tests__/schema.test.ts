@@ -52,7 +52,7 @@ describe('coffee schema', () => {
     ]);
   });
 
-  it('keeps the kernel column set for tips', async () => {
+  it('keeps the kernel column set for tips, plus the app-settlement columns added in #8', async () => {
     vi.stubEnv('APP_DB_SCHEMA', 'coffee');
     const { tips } = await loadSchema();
     const columns = getTableConfig(tips).columns.map((column) => column.name);
@@ -68,6 +68,10 @@ describe('coffee schema', () => {
       'payment_method',
       'payment_id',
       'status',
+      // #8: app-token checkout + settle bookkeeping (not part of the kernel's table)
+      'pay_transaction_id',
+      'payee_manifest',
+      'settled_at',
       'created_at',
     ]);
   });

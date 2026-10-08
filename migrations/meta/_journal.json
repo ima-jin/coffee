@@ -8,6 +8,13 @@
       "when": 1791305197697,
       "tag": "0000_coffee_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791467212775,
+      "tag": "0001_tips_app_settlement",
+      "breakpoints": true
     }
   ]
 }

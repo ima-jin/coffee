@@ -2,9 +2,10 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { createLogger } from '@ima-jin/logger';
-import { db, tips } from '@/db';
+import { db, tips, type Tip } from '@/db';
 import { webhookSecret } from '@/lib/env';
 import { settleTip } from '@/lib/settle';
+import type { PayeeManifest } from '@/lib/tip-manifest';
 
 const log = createLogger('coffee');
 
@@ -15,34 +16,41 @@ function isAuthorized(authHeader: string | null, secret: string): boolean {
   return timingSafeEqual(digest(authHeader), digest(`Bearer ${secret}`));
 }
 
-/** Resolve the recipient DID for the coffee page a tip was sent to */
-async function resolveRecipientDid(toDid: string | undefined, pageId: string | undefined): Promise<string | undefined> {
-  if (toDid || !pageId) return toDid;
-  const page = await db.query.coffeePages.findFirst({
-    where: (pages, { eq }) => eq(pages.id, pageId),
-  });
-  return page?.did;
+/** True when a stored `payee_manifest` has the `{ chain: [...] }` shape settle posts back. */
+function isPayeeManifest(value: unknown): value is PayeeManifest {
+  return typeof value === 'object' && value !== null && Array.isArray((value as { chain?: unknown }).chain);
 }
 
-/** Fall back to the tip record's stored amount when the webhook payload didn't include one */
-async function resolveTipAmount(tipId: string): Promise<number | undefined> {
-  const tip = await db.query.tips.findFirst({
-    where: (t, { eq }) => eq(t.id, tipId),
+/**
+ * Settle a completed tip's .fair split with the manifest + transaction id recorded at checkout.
+ * Idempotent across webhook redelivery: a tip that is already marked settled is not settled
+ * again, and a settle the kernel answers `alreadySettled` still counts as success.
+ */
+async function settleCompletedTip(tip: Tip): Promise<void> {
+  if (tip.settledAt) {
+    log.info({ tipId: tip.id }, '[webhook] Tip already settled — skipping');
+    return;
+  }
+
+  if (!tip.payTransactionId || !isPayeeManifest(tip.payeeManifest)) {
+    log.warn({ tipId: tip.id }, '[webhook] Cannot settle tip — no pay transactionId / payee manifest recorded at checkout');
+    return;
+  }
+
+  const outcome = await settleTip({
+    tipId: tip.id,
+    payTransactionId: tip.payTransactionId,
+    manifest: tip.payeeManifest,
   });
-  return tip?.amount;
+
+  if (outcome === 'settled' || outcome === 'already-settled') {
+    await db.update(tips).set({ settledAt: new Date() }).where(eq(tips.id, tip.id));
+  }
 }
 
 /** Handle a completed payment: mark the tip as completed and settle the .fair split */
-async function handlePaymentSucceeded(params: {
-  tipId: string;
-  paymentId: string | undefined;
-  amount: number | undefined;
-  fromDid: string | undefined;
-  to_did: string | undefined;
-  pageId: string | undefined;
-  stripeSessionId: string | undefined;
-}): Promise<void> {
-  const { tipId, paymentId, amount, fromDid, to_did: toDid, pageId, stripeSessionId } = params;
+async function handlePaymentSucceeded(params: { tipId: string; paymentId: string | undefined }): Promise<void> {
+  const { tipId, paymentId } = params;
 
   // Update tip status
   await db
@@ -51,23 +59,13 @@ async function handlePaymentSucceeded(params: {
     .where(eq(tips.id, tipId));
   log.info({ tipId }, 'Tip completed');
 
-  const recipientDid = await resolveRecipientDid(toDid, pageId);
-
-  // Resolve tip amount — prefer webhook payload, fall back to tip record
-  const tipAmount = amount || (await resolveTipAmount(tipId));
-
-  // Settle the .fair split
-  if (recipientDid && tipAmount) {
-    await settleTip({
-      tipId,
-      recipientDid,
-      fromDid: fromDid || null,
-      amount: tipAmount,
-      currency: 'USD',
-      stripeSessionId,
-    });
+  const tip = await db.query.tips.findFirst({
+    where: (t, { eq: equals }) => equals(t.id, tipId),
+  });
+  if (tip) {
+    await settleCompletedTip(tip);
   } else {
-    log.warn({ tipId }, '[webhook] Cannot settle tip — missing recipientDid or amount');
+    log.warn({ tipId }, '[webhook] Cannot settle tip — tip record not found');
   }
 
   // The kernel version also published `tip.granted` / `tip.sent` to the
@@ -89,7 +87,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { type, tipId, paymentId, amount, fromDid, to_did, pageId, stripeSessionId } = await request.json();
+    const { type, tipId, paymentId } = await request.json();
 
     if (!tipId) {
       return Response.json({ received: true }); // Not a tip event
@@ -98,7 +96,7 @@ export async function POST(request: NextRequest) {
     switch (type) {
       case 'payment.succeeded':
       case 'checkout.completed': {
-        await handlePaymentSucceeded({ tipId, paymentId, amount, fromDid, to_did, pageId, stripeSessionId });
+        await handlePaymentSucceeded({ tipId, paymentId });
         break;
       }
 
