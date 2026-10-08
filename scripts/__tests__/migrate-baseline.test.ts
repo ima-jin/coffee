@@ -25,6 +25,12 @@ const TRACKING = 'coffee.__drizzle_migrations';
 // must be pointed at the very same place the CLI uses.
 const MIGRATE_OPTIONS = { migrationsFolder: MIGRATIONS_FOLDER, migrationsSchema: SCHEMA };
 
+/** Number of migrations in the committed journal — what a fully migrated database has recorded. */
+function journalEntryCount(): number {
+  const journal = JSON.parse(readFileSync(`${MIGRATIONS_FOLDER}/meta/_journal.json`, 'utf8'));
+  return journal.entries.length;
+}
+
 type RunnerSql = Parameters<typeof runBaseline>[0];
 type Options = { dryRun?: boolean };
 
@@ -262,14 +268,26 @@ describe.skipIf(!databaseUrl)('migrate-baseline against a real Postgres', () => 
       expect(await rowCounts()).toEqual({ pages: 1, tips: 1 });
     });
 
-    it('leaves drizzle migrate a clean no-op afterwards (no CREATE TABLE collision)', async () => {
+    it('leaves drizzle migrate to apply only the migrations after 0000 (no CREATE TABLE collision)', async () => {
       await seedProdLike();
       await run(sql);
 
       await migrate(drizzle(sql), MIGRATE_OPTIONS);
 
+      // Existing data survives, 0000 is not re-run, and every later migration is recorded exactly once.
       expect(await rowCounts()).toEqual({ pages: 1, tips: 1 });
-      expect(await trackingRows()).toHaveLength(1);
+      expect(await trackingRows()).toHaveLength(journalEntryCount());
+      const columns = await sql.unsafe(
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_schema = 'coffee' AND table_name = 'tips' AND column_name IN ('pay_transaction_id', 'payee_manifest', 'settled_at')`,
+      );
+      expect(columns.map((row) => row.column_name).sort()).toEqual(['payee_manifest', 'pay_transaction_id', 'settled_at'].sort());
+      const [tip] = await sql.unsafe(`SELECT pay_transaction_id, payee_manifest, settled_at FROM coffee.tips WHERE id = 'tip_1'`);
+      expect(tip).toEqual({ pay_transaction_id: null, payee_manifest: null, settled_at: null });
+
+      // A second migrate stays a no-op.
+      await migrate(drizzle(sql), MIGRATE_OPTIONS);
+      expect(await trackingRows()).toHaveLength(journalEntryCount());
     });
 
     it('without the baseline, migrate fails on the existing schema (why this script exists)', async () => {
@@ -278,14 +296,17 @@ describe.skipIf(!databaseUrl)('migrate-baseline against a real Postgres', () => 
     });
 
     it('accepts a schema produced by migration 0000 itself (expectation cannot drift from the SQL)', async () => {
-      await migrate(drizzle(sql), MIGRATE_OPTIONS);
-      expect((await run(sql)).status).toBe('already-baselined');
+      // Apply ONLY the baseline migration's SQL — the expectation is pinned to 0000, not to later migrations.
+      for (const statement of readFileSync(BASELINE_SQL_FILE, 'utf8').split('--> statement-breakpoint')) {
+        await sql.unsafe(statement);
+      }
+      await sql.unsafe(`CREATE TABLE ${TRACKING} (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at bigint)`);
 
-      // Same schema, but drizzle's record of it is gone: must validate and baseline,
-      // ignoring the (now empty) tracking table that lives in the app schema.
-      await sql.unsafe(`DELETE FROM ${TRACKING}`);
+      // Valid schema, drizzle has no record of it: must validate and baseline,
+      // ignoring the (empty) tracking table that lives in the app schema.
       expect((await run(sql)).status).toBe('baselined');
       expect(await trackingRows()).toHaveLength(1);
+      expect((await run(sql)).status).toBe('already-baselined');
     });
 
     it('dry run validates but writes nothing', async () => {
