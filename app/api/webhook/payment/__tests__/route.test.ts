@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => {
     whereMock,
     setMock,
     updateMock: vi.fn(() => ({ set: setMock })),
-    findPageMock: vi.fn(),
     findTipMock: vi.fn(),
     settleTipMock: vi.fn(),
     log: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
@@ -19,7 +18,7 @@ vi.mock('drizzle-orm', () => ({ eq: vi.fn((column: unknown, value: unknown) => (
 vi.mock('@/db', () => ({
   db: {
     update: mocks.updateMock,
-    query: { coffeePages: { findFirst: mocks.findPageMock }, tips: { findFirst: mocks.findTipMock } },
+    query: { tips: { findFirst: mocks.findTipMock } },
   },
   tips: { id: 'id-column' },
 }));
@@ -28,6 +27,15 @@ vi.mock('@/lib/settle', () => ({ settleTip: mocks.settleTipMock }));
 import { POST } from '../route';
 
 const SECRET = 'webhook-secret';
+
+const MANIFEST = {
+  chain: [
+    { did: 'did:imajin:creator', role: 'creator', amount: 4.93 },
+    { did: 'did:imajin:platform', role: 'platform', amount: 0.07 },
+  ],
+};
+
+const TIP = { id: 'tip_1', payTransactionId: 'tx_1', payeeManifest: MANIFEST, settledAt: null };
 
 function makeRequest(body: unknown, authorization: string | null = `Bearer ${SECRET}`): Parameters<typeof POST>[0] {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -43,9 +51,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv('WEBHOOK_SECRET', SECRET);
   mocks.whereMock.mockResolvedValue(undefined);
-  mocks.findPageMock.mockResolvedValue(undefined);
-  mocks.findTipMock.mockResolvedValue(undefined);
-  mocks.settleTipMock.mockResolvedValue(undefined);
+  mocks.findTipMock.mockResolvedValue({ ...TIP });
+  mocks.settleTipMock.mockResolvedValue('settled');
 });
 
 describe('POST /api/webhook/payment — authentication', () => {
@@ -75,50 +82,81 @@ describe('POST /api/webhook/payment — events', () => {
     expect(mocks.updateMock).not.toHaveBeenCalled();
   });
 
-  it('completes the tip and settles the .fair split using the payload', async () => {
-    const res = await POST(
-      makeRequest({
-        type: 'payment.succeeded',
-        tipId: 'tip_1',
-        paymentId: 'pi_1',
-        amount: 500,
-        fromDid: 'did:imajin:fan',
-        to_did: 'did:imajin:creator',
-        pageId: 'page_1',
-        stripeSessionId: 'cs_1',
-      }),
-    );
+  it('completes the tip and settles with the transaction id + manifest recorded at checkout', async () => {
+    const res = await POST(makeRequest({ type: 'payment.succeeded', tipId: 'tip_1', paymentId: 'pi_1', amount: 500 }));
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ received: true });
-    expect(mocks.setMock).toHaveBeenCalledWith({ status: 'completed', paymentId: 'pi_1' });
-    expect(mocks.whereMock).toHaveBeenCalledWith({ column: 'id-column', value: 'tip_1' });
-    expect(mocks.settleTipMock).toHaveBeenCalledWith({
-      tipId: 'tip_1',
-      recipientDid: 'did:imajin:creator',
-      fromDid: 'did:imajin:fan',
-      amount: 500,
-      currency: 'USD',
-      stripeSessionId: 'cs_1',
-    });
-    expect(mocks.findPageMock).not.toHaveBeenCalled();
-    expect(mocks.findTipMock).not.toHaveBeenCalled();
+    expect(mocks.setMock).toHaveBeenNthCalledWith(1, { status: 'completed', paymentId: 'pi_1' });
+    expect(mocks.whereMock).toHaveBeenNthCalledWith(1, { column: 'id-column', value: 'tip_1' });
+    expect(mocks.settleTipMock).toHaveBeenCalledTimes(1);
+    expect(mocks.settleTipMock).toHaveBeenCalledWith({ tipId: 'tip_1', payTransactionId: 'tx_1', manifest: MANIFEST });
   });
 
-  it('treats checkout.completed like payment.succeeded, falling back to the stored page and tip amount', async () => {
-    mocks.findPageMock.mockResolvedValue({ did: 'did:imajin:creator' });
-    mocks.findTipMock.mockResolvedValue({ amount: 700 });
+  it('marks the tip settled once the kernel confirms', async () => {
+    await POST(makeRequest({ type: 'payment.succeeded', tipId: 'tip_1' }));
 
-    await POST(makeRequest({ type: 'checkout.completed', tipId: 'tip_2', pageId: 'page_1' }));
+    expect(mocks.setMock).toHaveBeenNthCalledWith(2, { settledAt: expect.any(Date) });
+    expect(mocks.whereMock).toHaveBeenNthCalledWith(2, { column: 'id-column', value: 'tip_1' });
+  });
 
+  it('treats alreadySettled as success and marks the tip settled', async () => {
+    mocks.settleTipMock.mockResolvedValue('already-settled');
+
+    await POST(makeRequest({ type: 'payment.succeeded', tipId: 'tip_1' }));
+
+    expect(mocks.setMock).toHaveBeenNthCalledWith(2, { settledAt: expect.any(Date) });
+  });
+
+  it('is idempotent across webhook redelivery: a second delivery does not settle again', async () => {
+    // Delivery 1 settles and marks the tip; the tip row then carries settledAt.
+    await POST(makeRequest({ type: 'payment.succeeded', tipId: 'tip_1' }));
+    expect(mocks.settleTipMock).toHaveBeenCalledTimes(1);
+    const settledAt = (mocks.setMock.mock.calls[1] as unknown as [{ settledAt: Date }])[0].settledAt;
+
+    mocks.findTipMock.mockResolvedValue({ ...TIP, settledAt });
+    mocks.setMock.mockClear();
+
+    const res = await POST(makeRequest({ type: 'payment.succeeded', tipId: 'tip_1' }));
+
+    expect(res.status).toBe(200);
+    expect(mocks.settleTipMock).toHaveBeenCalledTimes(1);
+    expect(mocks.setMock).toHaveBeenCalledTimes(1); // only the (harmless) status re-assertion
     expect(mocks.setMock).toHaveBeenCalledWith({ status: 'completed' });
-    expect(mocks.settleTipMock).toHaveBeenCalledWith(
-      expect.objectContaining({ tipId: 'tip_2', recipientDid: 'did:imajin:creator', fromDid: null, amount: 700 }),
-    );
   });
 
-  it('skips settlement (but still completes the tip) when the recipient cannot be resolved', async () => {
-    const res = await POST(makeRequest({ type: 'payment.succeeded', tipId: 'tip_3', amount: 500 }));
+  it('stays retry-safe when the first settle failed: a redelivery settles again', async () => {
+    mocks.settleTipMock.mockResolvedValueOnce('failed').mockResolvedValueOnce('already-settled');
+
+    await POST(makeRequest({ type: 'payment.succeeded', tipId: 'tip_1' }));
+    expect(mocks.setMock).not.toHaveBeenCalledWith({ settledAt: expect.any(Date) });
+
+    await POST(makeRequest({ type: 'payment.succeeded', tipId: 'tip_1' }));
+    expect(mocks.settleTipMock).toHaveBeenCalledTimes(2);
+    expect(mocks.setMock).toHaveBeenCalledWith({ settledAt: expect.any(Date) });
+  });
+
+  it.each(['not-completed', 'rejected', 'failed'] as const)(
+    'completes the tip but does not mark it settled when settle answers %s',
+    async (outcome) => {
+      mocks.settleTipMock.mockResolvedValue(outcome);
+
+      const res = await POST(makeRequest({ type: 'checkout.completed', tipId: 'tip_1' }));
+
+      expect(res.status).toBe(200);
+      expect(mocks.setMock).toHaveBeenCalledTimes(1);
+      expect(mocks.setMock).toHaveBeenCalledWith({ status: 'completed' });
+    },
+  );
+
+  it.each([
+    ['no pay transactionId', { ...TIP, payTransactionId: null }],
+    ['no payee manifest', { ...TIP, payeeManifest: null }],
+    ['a malformed payee manifest', { ...TIP, payeeManifest: { chain: 'nope' } }],
+  ])('skips settlement (but still completes the tip) with %s', async (_label, tip) => {
+    mocks.findTipMock.mockResolvedValue(tip);
+
+    const res = await POST(makeRequest({ type: 'payment.succeeded', tipId: 'tip_3' }));
 
     expect(res.status).toBe(200);
     expect(mocks.setMock).toHaveBeenCalledWith({ status: 'completed' });
@@ -126,10 +164,14 @@ describe('POST /api/webhook/payment — events', () => {
     expect(mocks.log.warn).toHaveBeenCalled();
   });
 
-  it('skips settlement when no amount is known anywhere', async () => {
-    await POST(makeRequest({ type: 'payment.succeeded', tipId: 'tip_4', to_did: 'did:imajin:creator' }));
+  it('skips settlement when the tip record cannot be found', async () => {
+    mocks.findTipMock.mockResolvedValue(undefined);
 
+    const res = await POST(makeRequest({ type: 'payment.succeeded', tipId: 'tip_4' }));
+
+    expect(res.status).toBe(200);
     expect(mocks.settleTipMock).not.toHaveBeenCalled();
+    expect(mocks.log.warn).toHaveBeenCalled();
   });
 
   it('marks the tip failed on payment.failed', async () => {

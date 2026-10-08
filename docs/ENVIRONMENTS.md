@@ -53,7 +53,7 @@ Missing any of these and `scripts/check-env.mjs` fails the deploy before anythin
 | `REGISTRY_SERVICE_URL` | runtime | `https://dev-jin.imajin.ai/registry` | `https://jin.imajin.ai/registry` | Kernel registry service base URL, including the /registry prefix. Public node config for .fair manifests. |
 | `PAY_SERVICE_URL` | runtime | `https://dev-jin.imajin.ai/pay` | `https://jin.imajin.ai/pay` | Kernel pay service base URL, including the /pay prefix. Target of Stripe Checkout creation and tip settlement. |
 | `NEXT_PUBLIC_PAY_URL` | build | `https://dev-jin.imajin.ai/pay` | `https://jin.imajin.ai/pay` | Browser-visible base URL of the same pay service (Stripe Connect payout banner on /dashboard). Baked at build time; rebuild after changing. |
-| `IMAJIN_KERNEL_URL` | runtime | `https://dev-jin.imajin.ai` | `https://jin.imajin.ai` | Kernel base URL (no path). Used to fetch this app's signing key at boot (loadAppSigningKey) — same host as IMAJIN_AUTH_URL. |
+| `IMAJIN_KERNEL_URL` | runtime | `https://dev-jin.imajin.ai` | `https://jin.imajin.ai` | Kernel base URL (no path). Used to fetch this app's signing key at boot (loadAppSigningKey) and to mint its app-service token (POST /auth/api/apps/token/service) for pay checkout + settle — same host as IMAJIN_AUTH_URL. |
 | `NEXT_PUBLIC_KERNEL_URL` | runtime | `https://dev-jin.imajin.ai` | `https://jin.imajin.ai` | Absolute kernel origin that @ima-jin/config's /dashboard -> hub redirect middleware targets (read dynamically as NEXT_PUBLIC_<SERVICE>_URL). Without it the redirect resolves to the wrong host (kernel.imajin.ai, or prod from dev). Set it before both `next build` and `next start`. |
 | `NEXT_PUBLIC_BASE_PATH` | build | `/coffee` | `/coffee` | Reverse-proxy path prefix the app is mounted under. Must be `/coffee`. Baked at build time; rebuild after changing. |
 | `NEXT_PUBLIC_APP_URL` | runtime | `https://dev-jin.imajin.ai` | `https://jin.imajin.ai` | This app's public origin (no base path). Its HOST is the `aud` used to verify scoped app tokens — it must match a host in this app's registered tokenAudiences — and the origin of Stripe success/cancel redirects. |
@@ -74,7 +74,6 @@ Set once, then delete. This is how the operator's claim code is spent (see [Iden
 
 | Variable | When | Dev | Prod | What it does |
 |---|---|---|---|---|
-| `PAY_SERVICE_API_KEY` **(secret)** | runtime | (optional) | (set it on prod) | Service key for POST {pay}/api/settle (service-to-service). Unset -> tip settlement is skipped (logged, non-fatal); set it wherever settlement should run. Env only, never committed. |
 | `PLATFORM_DID` | runtime | `did:imajin:platform` | `did:imajin:platform` | Platform DID that receives the platform fee in .fair settlement (default did:imajin:platform). |
 | `PLATFORM_FEE_PERCENT` | runtime | `1.5` | `1.5` | Platform fee percentage applied to tips at settlement (default 1.5). |
 | `IMAJIN_ENV` | runtime | `dev` | (unset) | Selects the kernel session cookie name in @ima-jin/config: `dev` → imajin_session_dev, anything else → imajin_session. MUST be `dev` on the dev instance (a production build is NODE_ENV=production, which does not imply dev); leave unset on prod. |
@@ -168,7 +167,6 @@ PAY_SERVICE_URL=https://dev-jin.imajin.ai/pay
 # WEBHOOK_SECRET must equal the dev pay service's webhook secret.
 SESSION_SECRET=REPLACE_ME
 WEBHOOK_SECRET=REPLACE_ME
-PAY_SERVICE_API_KEY=
 
 # --- Identity (operator step: README "Identity", docs/REGISTRATION.md) ---
 IMAJIN_APP_DID=did:imajin:REPLACE_ME
@@ -215,7 +213,6 @@ PAY_SERVICE_URL=https://jin.imajin.ai/pay
 # WEBHOOK_SECRET must equal the prod pay service's webhook secret.
 SESSION_SECRET=REPLACE_ME
 WEBHOOK_SECRET=REPLACE_ME
-PAY_SERVICE_API_KEY=
 
 # --- Identity (operator step: README "Identity", docs/REGISTRATION.md) ---
 IMAJIN_APP_DID=did:imajin:REPLACE_ME

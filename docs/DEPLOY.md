@@ -73,7 +73,10 @@ Dev and prod are separate identities: each has its own app DID, claim code, keys
 2. **Create the databases/roles** and put the connection strings in each `.env.local`. Prod/dev already contain
    the `coffee` schema with real tips data; the baseline adopts it in place.
 3. **Fill in the secrets** — `SESSION_SECRET` (`openssl rand -hex 32`), `WEBHOOK_SECRET` (must equal the matching
-   pay service's), and `PAY_SERVICE_API_KEY` where settlement should run.
+   pay service's).
+   Settlement needs no key in the env: coffee settles with its own app-service token. The operator must **approve the
+   `pay:settle` service scope for this app's DID** (propose it via `POST /api/apps/service-scopes`, countersign on the
+   `apps:service-scopes` card on `/jin`) — until then the token mint drops the scope and pay refuses checkout and settle.
 4. **Caddy** — the route already exists; verify it against the [snippet below](#caddy).
 
 ### One-time cutover checklist

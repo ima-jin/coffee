@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
     rateLimitMock: vi.fn(),
     optionalCallerDidMock: vi.fn(),
     fetchMock: vi.fn(),
+    getAppServiceTokenMock: vi.fn(),
   };
 });
 
@@ -18,6 +19,7 @@ vi.mock('@/db', () => ({
   db: { insert: mocks.insertMock, query: { coffeePages: { findFirst: mocks.findFirstMock } } },
   tips: {},
 }));
+vi.mock('@/lib/app-service-token', () => ({ getAppServiceToken: mocks.getAppServiceTokenMock }));
 vi.mock('@/lib/auth/authenticate', () => ({ optionalCallerDid: mocks.optionalCallerDidMock }));
 
 import { POST } from '../route';
@@ -52,8 +54,19 @@ beforeEach(() => {
   mocks.optionalCallerDidMock.mockResolvedValue(null);
   mocks.valuesMock.mockResolvedValue(undefined);
   mocks.findFirstMock.mockResolvedValue(PAGE);
-  mocks.fetchMock.mockResolvedValue({ ok: true, json: async () => ({ id: 'cs_1', url: 'https://checkout.test/cs_1' }) });
+  mocks.getAppServiceTokenMock.mockResolvedValue('app-service-token');
+  mocks.fetchMock.mockResolvedValue({
+    ok: true,
+    json: async () => ({ id: 'cs_1', url: 'https://checkout.test/cs_1', transactionId: 'tx_1' }),
+  });
 });
+
+const EXPECTED_MANIFEST = {
+  chain: [
+    { did: 'did:imajin:creator', role: 'creator', amount: 4.93 },
+    { did: 'did:imajin:platform', role: 'platform', amount: 0.07 },
+  ],
+};
 
 describe('POST /api/tip — guards', () => {
   it('returns 429 when rate limited', async () => {
@@ -142,9 +155,11 @@ describe('POST /api/tip — stripe', () => {
 
     const [url, init] = mocks.fetchMock.mock.calls[0];
     expect(url).toBe('https://kernel.test/pay/api/checkout');
+    expect(init.headers.Authorization).toBe('Bearer app-service-token');
     const sent = JSON.parse(init.body);
     expect(sent).toMatchObject({
       sellerDid: 'did:imajin:creator',
+      payeeManifest: EXPECTED_MANIFEST,
       currency: 'USD',
       mode: 'payment',
       successUrl: 'https://coffee.test/success?handle=creator',
@@ -173,9 +188,31 @@ describe('POST /api/tip — stripe', () => {
         message: 'Thanks',
         paymentMethod: 'stripe',
         paymentId: 'cs_1',
+        payTransactionId: 'tx_1',
+        payeeManifest: EXPECTED_MANIFEST,
         status: 'pending',
       }),
     );
+  });
+
+  it('still records the tip (unsettleable) when pay returns no transactionId', async () => {
+    mocks.fetchMock.mockResolvedValue({ ok: true, json: async () => ({ id: 'cs_1', url: 'https://checkout.test/cs_1' }) });
+
+    const res = await POST(makeRequest(STRIPE_BODY));
+
+    expect(res.status).toBe(200);
+    expect(mocks.valuesMock).toHaveBeenCalledWith(expect.objectContaining({ payTransactionId: null }));
+  });
+
+  it('returns 500 and never calls pay when the app-service token cannot be minted', async () => {
+    mocks.getAppServiceTokenMock.mockRejectedValue(new Error('mint refused'));
+
+    const res = await POST(makeRequest(STRIPE_BODY));
+
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toBe('Failed to process tip');
+    expect(mocks.fetchMock).not.toHaveBeenCalled();
+    expect(mocks.valuesMock).not.toHaveBeenCalled();
   });
 
   it('attributes the tip to an authenticated caller and supports monthly recurring tips', async () => {

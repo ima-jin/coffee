@@ -62,6 +62,9 @@ export const tips = appSchema.table(
     paymentMethod: text('payment_method').notNull(), // 'stripe' | 'solana'
     paymentId: text('payment_id').notNull(), // Stripe charge ID or Solana tx
     status: text('status').notNull().default('pending'), // pending, completed, failed
+    payTransactionId: text('pay_transaction_id'), // pay.transactions id returned by the app-authenticated checkout (null for Solana / pre-#8 tips)
+    payeeManifest: jsonb('payee_manifest'), // { chain } declared at checkout, posted back verbatim at settle
+    settledAt: timestamp('settled_at', { withTimezone: true }), // set once the kernel confirms settlement (idempotency marker)
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   },
   (table) => [

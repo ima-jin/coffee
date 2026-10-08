@@ -118,7 +118,6 @@ describe('validateEnv', () => {
     NEXT_PUBLIC_IMAJIN_APP_ID: 'app_abc123',
     SESSION_SECRET: 'session-secret-value',
     WEBHOOK_SECRET: 'webhook-secret-value',
-    PAY_SERVICE_API_KEY: 'pay-key-value',
     DATABASE_URL: 'postgres://coffee:pw@localhost:5432/db',
   };
   const PLACEHOLDER_VARS = ['DATABASE_URL', 'IMAJIN_APP_DID', 'NEXT_PUBLIC_IMAJIN_APP_ID', 'SESSION_SECRET', 'WEBHOOK_SECRET'];
@@ -211,7 +210,6 @@ describe('check-env CLI', () => {
       NEXT_PUBLIC_IMAJIN_APP_ID: 'app_abc123',
       SESSION_SECRET: 'session-secret-value',
       WEBHOOK_SECRET: 'webhook-secret-value',
-      PAY_SERVICE_API_KEY: 'pay-key-value',
       DATABASE_URL: 'postgres://coffee:pw@localhost:5432/db',
     });
     writeFileSync(file, filled.map(([name, value]) => `${name}=${value}`).join('\n'));

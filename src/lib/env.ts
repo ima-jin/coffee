@@ -24,6 +24,11 @@ export function payServiceUrl(): string {
   return stripTrailingSlashes(required('PAY_SERVICE_URL'));
 }
 
+/** Kernel base URL (no path), e.g. https://dev-jin.imajin.ai — the host of `/auth/api/apps/token/service`. */
+export function kernelUrl(): string {
+  return stripTrailingSlashes(required('IMAJIN_KERNEL_URL'));
+}
+
 /** Shared secret the pay service presents on `POST /api/webhook/payment`. */
 export function webhookSecret(): string | undefined {
   return process.env.WEBHOOK_SECRET || undefined;

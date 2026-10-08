@@ -68,7 +68,7 @@
     "name": "IMAJIN_KERNEL_URL",
     "status": "required",
     "phase": "runtime",
-    "summary": "Kernel base URL (no path). Used to fetch this app's signing key at boot (loadAppSigningKey) — same host as IMAJIN_AUTH_URL.",
+    "summary": "Kernel base URL (no path). Used to fetch this app's signing key at boot (loadAppSigningKey) and to mint its app-service token (POST /auth/api/apps/token/service) for pay checkout + settle — same host as IMAJIN_AUTH_URL.",
     "dev": "https://dev-jin.imajin.ai",
     "prod": "https://jin.imajin.ai"
   },
@@ -129,15 +129,6 @@
     "summary": "Shared secret the kernel pay service presents on POST /api/webhook/payment (Authorization: Bearer …). Unset -> the webhook answers 500 and tips never complete.",
     "dev": "(the dev pay service's webhook secret)",
     "prod": "(the prod pay service's webhook secret)"
-  },
-  {
-    "name": "PAY_SERVICE_API_KEY",
-    "status": "optional",
-    "phase": "runtime",
-    "secret": true,
-    "summary": "Service key for POST {pay}/api/settle (service-to-service). Unset -> tip settlement is skipped (logged, non-fatal); set it wherever settlement should run. Env only, never committed.",
-    "dev": "(optional)",
-    "prod": "(set it on prod)"
   },
   {
     "name": "PLATFORM_DID",

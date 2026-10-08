@@ -2,8 +2,10 @@ import { NextRequest } from 'next/server';
 import { createLogger } from '@ima-jin/logger';
 import { rateLimit, getClientIP } from '@ima-jin/config';
 import { db, tips, type CoffeePage } from '@/db';
+import { getAppServiceToken } from '@/lib/app-service-token';
 import { optionalCallerDid } from '@/lib/auth/authenticate';
 import { payServiceUrl, publicAppUrl } from '@/lib/env';
+import { buildTipPayeeManifest } from '@/lib/tip-manifest';
 import { jsonResponse, errorResponse, generateId } from '@/lib/utils';
 
 const log = createLogger('coffee');
@@ -81,12 +83,18 @@ async function createStripeTip(params: {
   const { tipId, page, amount, currency, message, fromName, fromDid, fundDirection, recurring, pageHandle } = params;
   const appUrl = publicAppUrl();
 
+  // Checkout as this app: the app-service token binds the payment to coffee's DID
+  // (pay.transactions.app_did) and the declared payee manifest is what settle later verifies.
+  const appToken = await getAppServiceToken();
+  const payeeManifest = buildTipPayeeManifest(page.did, amount);
+
   // Use Stripe Checkout (redirect flow) via pay service
   const payRes = await fetch(`${payServiceUrl()}/api/checkout`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${appToken}` },
     body: JSON.stringify({
       sellerDid: page.did,
+      payeeManifest,
       items: [
         {
           name: `Tip for ${page.title || page.handle}`,
@@ -121,6 +129,9 @@ async function createStripeTip(params: {
   }
 
   const payData = await payRes.json();
+  if (!payData.transactionId) {
+    log.warn({ tipId }, 'Pay checkout returned no transactionId — this tip cannot be settled');
+  }
 
   // Insert pending tip
   await db.insert(tips).values({
@@ -133,6 +144,8 @@ async function createStripeTip(params: {
     message: message || null,
     paymentMethod: 'stripe',
     paymentId: payData.id,
+    payTransactionId: payData.transactionId ?? null,
+    payeeManifest,
     status: 'pending',
   });
 

@@ -178,9 +178,6 @@ function collectWarnings(get, target) {
   if (get('IMAJIN_APP_CLAIM_CODE') !== '') {
     warnings.push('IMAJIN_APP_CLAIM_CODE is set — it is needed on the first boot only; remove it once the app has booted once.');
   }
-  if (target === 'prod' && get('PAY_SERVICE_API_KEY') === '') {
-    warnings.push('PAY_SERVICE_API_KEY is not set — tip settlement will be skipped on this instance.');
-  }
   for (const name of ['ENABLE_APP_LOG', 'LOG_DB_TRANSPORT', 'ENABLE_REQUEST_LOG']) {
     if (get(name) === 'true') {
       warnings.push(`${name}=true — this app is stdout-logging only (AGENTS.md); leave it unset.`);
