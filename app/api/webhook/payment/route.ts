@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { createLogger } from '@ima-jin/logger';
 import { db, tips, type Tip } from '@/db';
+import { STRIPE_BYO_RAIL } from '@/lib/card-rail';
 import { webhookSecret } from '@/lib/env';
 import { settleTip } from '@/lib/settle';
 import type { PayeeManifest } from '@/lib/tip-manifest';
@@ -26,9 +27,18 @@ function isPayeeManifest(value: unknown): value is PayeeManifest {
  * Idempotent across webhook redelivery: a tip that is already marked settled is not settled
  * again, and a settle the kernel answers `alreadySettled` still counts as success.
  */
-async function settleCompletedTip(tip: Tip): Promise<void> {
+async function settleCompletedTip(tip: Tip, rail: string | undefined): Promise<void> {
   if (tip.settledAt) {
     log.info({ tipId: tip.id }, '[webhook] Tip already settled — skipping');
+    return;
+  }
+
+  // #2773: paid on the page owner's OWN Stripe account. The kernel already completed the payment and told
+  // us, so this notification IS the settlement — `/pay/api/settle` refuses such a payment (409), which
+  // `settleTip` would misread as "not completed yet". Nothing was distributed: the money never touched the platform.
+  if (rail === STRIPE_BYO_RAIL) {
+    await db.update(tips).set({ settledAt: new Date() }).where(eq(tips.id, tip.id));
+    log.info({ tipId: tip.id }, '[webhook] Tip paid on the owner\'s own Stripe account — nothing to settle on-platform');
     return;
   }
 
@@ -49,8 +59,12 @@ async function settleCompletedTip(tip: Tip): Promise<void> {
 }
 
 /** Handle a completed payment: mark the tip as completed and settle the .fair split */
-async function handlePaymentSucceeded(params: { tipId: string; paymentId: string | undefined }): Promise<void> {
-  const { tipId, paymentId } = params;
+async function handlePaymentSucceeded(params: {
+  tipId: string;
+  paymentId: string | undefined;
+  rail: string | undefined;
+}): Promise<void> {
+  const { tipId, paymentId, rail } = params;
 
   // Update tip status
   await db
@@ -63,7 +77,7 @@ async function handlePaymentSucceeded(params: { tipId: string; paymentId: string
     where: (t, { eq: equals }) => equals(t.id, tipId),
   });
   if (tip) {
-    await settleCompletedTip(tip);
+    await settleCompletedTip(tip, rail);
   } else {
     log.warn({ tipId }, '[webhook] Cannot settle tip — tip record not found');
   }
@@ -87,7 +101,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { type, tipId, paymentId } = await request.json();
+    const { type, tipId, paymentId, rail } = await request.json();
 
     if (!tipId) {
       return Response.json({ received: true }); // Not a tip event
@@ -96,7 +110,7 @@ export async function POST(request: NextRequest) {
     switch (type) {
       case 'payment.succeeded':
       case 'checkout.completed': {
-        await handlePaymentSucceeded({ tipId, paymentId });
+        await handlePaymentSucceeded({ tipId, paymentId, rail });
         break;
       }
 

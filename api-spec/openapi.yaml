@@ -399,7 +399,15 @@ paths:
     post:
       operationId: sendTip
       summary: Send a tip via Stripe Checkout (redirect) or Solana (address return)
-      description: Public. Anonymous callers may tip; a scoped app token or session attributes the tip to the caller's DID.
+      description: >
+        Public. Anonymous callers may tip; a scoped app token or session attributes the tip to the caller's DID.
+
+
+        A card tip is charged on the page owner's OWN Stripe account (their connected key; there is no
+        Stripe Connect). An owner with no connected key gets 400 with `code: SELLER_NO_CARD_RAIL`; an
+        owner whose Stripe account would not take the charge gets 502 with a `CARD_RAIL_*` code; a
+        monthly (`recurring`) card tip gets 400 with `code: SUBSCRIPTION_NOT_SUPPORTED`. Each carries a
+        plain tipper-facing `error`.
       tags: [coffee]
       security:
         - cookieAuth: []
@@ -442,10 +450,21 @@ paths:
                       amount: { type: integer }
                       paymentMethod: { type: string, enum: [solana] }
         "400":
-          description: Validation error, payment method not enabled on the page, or messages not allowed
+          description: >
+            Validation error, payment method not enabled on the page, messages not allowed, the page
+            owner has no card rail (`code: SELLER_NO_CARD_RAIL`), or a monthly card tip
+            (`code: SUBSCRIPTION_NOT_SUPPORTED`)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Error" }
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error: { type: string }
+                  code:
+                    type: string
+                    enum: [SELLER_NO_CARD_RAIL, SUBSCRIPTION_NOT_SUPPORTED]
+                    description: "Present for a card-rail refusal; the form hides the card option on SELLER_NO_CARD_RAIL."
         "403":
           description: Page is private (not accepting tips)
           content:
@@ -464,6 +483,16 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "502":
+          description: The page owner's Stripe account could not start the charge (`code` is one of `CARD_RAIL_KEY_MISSING`, `CARD_RAIL_KEY_REJECTED`, `CARD_RAIL_UNAVAILABLE`, `CARD_RAIL_REQUEST_REJECTED`)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, code]
+                properties:
+                  error: { type: string }
+                  code: { type: string, example: CARD_RAIL_UNAVAILABLE }
         "500":
           description: Server error
           content:
@@ -585,6 +614,11 @@ paths:
     post:
       operationId: coffeePaymentWebhook
       summary: Receive payment callbacks from pay service
+      description: >
+        A tip the kernel already settled on the page owner's own Stripe account arrives with
+        `rail: stripe-byo`: that callback is the settlement, so coffee completes the tip and marks it
+        settled WITHOUT calling `/pay/api/settle` (the kernel refuses such a payment). A callback with
+        no `rail` settles through `/pay/api/settle` as before.
       tags: [coffee]
       security:
         - webhookSecret: []
@@ -607,6 +641,10 @@ paths:
                 to_did: { type: string }
                 message: { type: string }
                 stripeSessionId: { type: string }
+                rail:
+                  type: string
+                  enum: [stripe-byo]
+                  description: "Set only when the payment was collected on the page owner's own Stripe account and the kernel has already settled it."
       responses:
         "200":
           description: Received

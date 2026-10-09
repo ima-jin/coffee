@@ -56,7 +56,7 @@ beforeEach(() => {
   vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://coffee.test');
   vi.stubEnv('NEXT_PUBLIC_BASE_PATH', '');
   mocks.findFirstMock.mockResolvedValue(PAGE);
-  mocks.fetchMock.mockResolvedValue({ ok: true, json: async () => ({ chargesEnabled: true }) });
+  mocks.fetchMock.mockResolvedValue({ ok: true, json: async () => ({ cardEnabled: true }) });
 });
 
 afterEach(() => {
@@ -84,28 +84,30 @@ describe('CoffeePage — page lookup', () => {
 });
 
 describe('CoffeePage — seller-connected check', () => {
-  it("asks the pay service about the owner's Stripe Connect status and passes sellerConnected=true to TipForm", async () => {
+  it("asks the pay service whether the owner has a card rail (their own Stripe key) and passes sellerConnected=true to TipForm", async () => {
     const element = await CoffeePage(props());
 
     expect(mocks.fetchMock).toHaveBeenCalledWith(
-      `https://kernel.test/pay/api/connect/check?did=${encodeURIComponent(PAGE.did)}`,
+      `https://kernel.test/pay/api/card-rail/check?did=${encodeURIComponent(PAGE.did)}`,
       { cache: 'no-store' },
     );
+    // The Connect route is gone (ima-jin/imajin-ai#2757): it must never be called.
+    expect(String(mocks.fetchMock.mock.calls[0]![0])).not.toContain('/connect/');
     const tipForm = findElementByType(element, mocks.tipFormMock);
     expect(tipForm).not.toBeNull();
     expect(tipForm!.props.sellerConnected).toBe(true);
     expect(tipForm!.props.page).toMatchObject({ handle: 'creator', presets: [300, 500, 1000], paymentMethods: {} });
   });
 
-  it('passes sellerConnected=false when charges are explicitly disabled', async () => {
-    mocks.fetchMock.mockResolvedValue({ ok: true, json: async () => ({ chargesEnabled: false }) });
+  it('passes sellerConnected=false when the owner has no card rail', async () => {
+    mocks.fetchMock.mockResolvedValue({ ok: true, json: async () => ({ cardEnabled: false }) });
 
     const tipForm = findElementByType(await CoffeePage(props()), mocks.tipFormMock);
 
     expect(tipForm!.props.sellerConnected).toBe(false);
   });
 
-  it('treats a response without chargesEnabled as not connected', async () => {
+  it('treats a response without cardEnabled as not connected', async () => {
     mocks.fetchMock.mockResolvedValue({ ok: true, json: async () => ({}) });
 
     const tipForm = findElementByType(await CoffeePage(props()), mocks.tipFormMock);

@@ -3,6 +3,7 @@ import { createLogger } from '@ima-jin/logger';
 import { rateLimit, getClientIP } from '@ima-jin/config';
 import { db, tips, type CoffeePage } from '@/db';
 import { getAppServiceToken } from '@/lib/app-service-token';
+import { cardRailFailure, payErrorCode } from '@/lib/card-rail';
 import { optionalCallerDid } from '@/lib/auth/authenticate';
 import { payServiceUrl, publicAppUrl } from '@/lib/env';
 import { buildTipPayeeManifest } from '@/lib/tip-manifest';
@@ -124,6 +125,13 @@ async function createStripeTip(params: {
 
   if (!payRes.ok) {
     const err = await payRes.text();
+    // #2773: no card rail / a Stripe account that would not take the charge / a monthly tip with a seller are
+    // not server faults — answer plainly and pass the code through so the form can hide the card option.
+    const railFailure = cardRailFailure(payErrorCode(err));
+    if (railFailure) {
+      log.warn({ code: railFailure.code, tipId }, 'Page owner has no working card rail');
+      return Response.json({ error: railFailure.message, code: railFailure.code }, { status: railFailure.status });
+    }
     log.error({ err }, 'Pay service checkout failed');
     return errorResponse('Failed to create payment', 500);
   }

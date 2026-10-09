@@ -174,6 +174,50 @@ describe('POST /api/webhook/payment — events', () => {
     expect(mocks.log.warn).toHaveBeenCalled();
   });
 
+  describe('paid on the page owner\'s own Stripe account (#2773)', () => {
+    const byo = (overrides: Record<string, unknown> = {}) => ({
+      type: 'payment.succeeded',
+      tipId: 'tip_1',
+      paymentId: 'pi_1',
+      rail: 'stripe-byo',
+      ...overrides,
+    });
+
+    it('treats the kernel notification as the settlement: completes the tip, marks it settled, never calls /pay/api/settle', async () => {
+      const res = await POST(makeRequest(byo()));
+
+      expect(res.status).toBe(200);
+      expect(mocks.setMock).toHaveBeenNthCalledWith(1, { status: 'completed', paymentId: 'pi_1' });
+      expect(mocks.setMock).toHaveBeenNthCalledWith(2, { settledAt: expect.any(Date) });
+      expect(mocks.whereMock).toHaveBeenNthCalledWith(2, { column: 'id-column', value: 'tip_1' });
+      expect(mocks.settleTipMock).not.toHaveBeenCalled();
+    });
+
+    it('settles even when the tip has no recorded pay transactionId or payee manifest', async () => {
+      mocks.findTipMock.mockResolvedValue({ ...TIP, payTransactionId: null, payeeManifest: null });
+
+      await POST(makeRequest(byo()));
+
+      expect(mocks.settleTipMock).not.toHaveBeenCalled();
+      expect(mocks.setMock).toHaveBeenCalledWith({ settledAt: expect.any(Date) });
+    });
+
+    it('is idempotent across redelivery: an already-settled tip is not marked again', async () => {
+      mocks.findTipMock.mockResolvedValue({ ...TIP, settledAt: new Date() });
+
+      await POST(makeRequest(byo()));
+
+      expect(mocks.setMock).toHaveBeenCalledTimes(1);
+      expect(mocks.setMock).not.toHaveBeenCalledWith({ settledAt: expect.any(Date) });
+    });
+
+    it('still settles a platform-collected tip (no rail) through /pay/api/settle', async () => {
+      await POST(makeRequest(byo({ rail: undefined })));
+
+      expect(mocks.settleTipMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('marks the tip failed on payment.failed', async () => {
     const res = await POST(makeRequest({ type: 'payment.failed', tipId: 'tip_5' }));
 

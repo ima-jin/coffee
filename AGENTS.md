@@ -205,6 +205,11 @@ Full text: `ima-jin/conventions/ISSUE-CONVENTIONS.md`. This §7 is kept in sync 
 - **Database:** own Postgres schema `coffee` (`APP_DB_SCHEMA=coffee`), tables `pages` and `tips`. Migrations in
   `migrations/`; see `docs/MIGRATIONS.md`.
 - **The real-world loop it instruments:** supporter → page owner, one paid leg (the tip).
+- **Card rail:** a card tip is charged on the page owner's OWN Stripe account (no Stripe Connect). A tip the kernel
+  already settled there arrives on `POST /api/webhook/payment` with `rail: stripe-byo` and that callback IS the
+  settlement — coffee never calls `/pay/api/settle` for it (the kernel refuses with 409). An owner with no connected key
+  gets `SELLER_NO_CARD_RAIL` (`src/lib/card-rail.ts`): `/api/tip` answers a plain 400 and the form hides the card option
+  (ima-jin/imajin-ai#2773). Coffee has no e-Transfer path; Solana is offered where the page enabled it.
 - **Domain events it emits (via kernel API):** none yet — the kernel version's `tip.granted`/`tip.sent` bus events have no app-callable API (gap, ima-jin/imajin-ai#2641).
 - **Connectors it consumes:** _<not wired yet — later migration steps>_
 - **Scope guardrails specific to this app:** no access to kernel schemas or tables; kernel data (identity,
