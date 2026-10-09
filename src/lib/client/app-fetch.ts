@@ -1,10 +1,10 @@
 import { withBasePath } from '@/lib/base-path';
-import { thisAppHost } from '@/lib/env';
+import { APP_SLUG } from '@/lib/env';
 
 /**
  * Browser-side fetch for this app's own authenticated API routes.
  *
- * Mints a short-lived scoped app token for this app's host from the signed-in
+ * Mints a short-lived scoped app token for this app's registry slug (#2706) from the signed-in
  * user's kernel session (`POST {kernel}/auth/api/tokens/app` — the same call
  * as `@ima-jin/auth-client`'s `requestAppToken`), caches it until shortly
  * before it expires, and presents it as `Authorization: Bearer <token>` — the
@@ -56,7 +56,7 @@ async function mintAppToken(authUrl: string): Promise<MintedToken | null> {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ aud: thisAppHost(), scopes: [] }),
+      body: JSON.stringify({ aud: process.env.NEXT_PUBLIC_IMAJIN_APP_AUD || APP_SLUG, scopes: [] }),
     });
     if (!res.ok) return null;
     return (await res.json()) as MintedToken;

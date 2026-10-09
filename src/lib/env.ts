@@ -3,7 +3,14 @@
  * kernel (or to any other service) is hard-coded anywhere else in this app.
  */
 
-const FALLBACK_APP_HOST = 'coffee.imajin.ai';
+/**
+ * This app's registry slug — the default audience of its scoped app tokens
+ * (#2706). Tokens are minted and verified against the slug, never a host: every
+ * path-routed app on a node shares one host. `IMAJIN_APP_AUD` overrides it on
+ * the server (read inside `@ima-jin/auth`); `NEXT_PUBLIC_IMAJIN_APP_AUD` is its
+ * browser-side twin for the token mint in `src/lib/client/app-fetch.ts`.
+ */
+export const APP_SLUG = 'coffee';
 
 function required(name: string): string {
   const value = process.env[name];
@@ -32,21 +39,6 @@ export function kernelUrl(): string {
 /** Shared secret the pay service presents on `POST /api/webhook/payment`. */
 export function webhookSecret(): string | undefined {
   return process.env.WEBHOOK_SECRET || undefined;
-}
-
-/**
- * This app's own host, used as the `aud` for scoped app-token verification
- * (see `@ima-jin/auth`'s `requireSessionOrAppToken`). A token minted for any
- * other host can never verify here.
- */
-export function thisAppHost(): string {
-  const base = process.env.NEXT_PUBLIC_APP_URL;
-  if (!base) return FALLBACK_APP_HOST;
-  try {
-    return new URL(base).host;
-  } catch {
-    return FALLBACK_APP_HOST;
-  }
 }
 
 /**

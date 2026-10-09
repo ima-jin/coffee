@@ -52,8 +52,9 @@ redelivery (`tips.settled_at`, plus the kernel's `alreadySettled`).
 ## Auth: the app-token contract (#1974)
 
 Every authenticated route calls `authenticate()` (`src/lib/auth/authenticate.ts`) and nothing else — no route imports an
-auth primitive directly. It runs `requireSessionOrAppToken` from the published `@ima-jin/auth` with `aud = thisAppHost()`
-(the host of `NEXT_PUBLIC_APP_URL`), so a token minted for another host can never verify here. In order:
+auth primitive directly. It runs `requireSessionOrAppToken` from the published `@ima-jin/auth` with `slug: 'coffee'`
+(`IMAJIN_APP_AUD` overrides it) — the audience is coffee's registry slug, never a host, because every path-routed app
+shares one host (#2706); a token minted for another app can never verify here. In order:
 
 1. `Authorization: Bearer <scoped app token>` — minted by the browser (`src/lib/client/app-fetch.ts`) from the user's
    kernel session via `POST {kernel}/auth/api/tokens/app`, verified against the kernel.

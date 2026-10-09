@@ -165,6 +165,34 @@ describe('DELETE /api/pages/:handle', () => {
     expect(mocks.deleteMock).not.toHaveBeenCalled();
   });
 
+  it('refuses a delegate with the owner-countersign 403 and deletes nothing (#2360)', async () => {
+    mocks.authenticateMock.mockResolvedValue({
+      auth: { did: 'did:imajin:agent', actingFor: 'did:imajin:creator', scopes: [], via: 'token' },
+    });
+
+    const res = await DELETE(makeRequest('DELETE'), PROPS);
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({
+      code: 'AGENT_APPROVAL_REQUIRED',
+      action: 'delete',
+      class: 'irreversible',
+      resourceId: 'creator',
+      ownerDid: 'did:imajin:creator',
+      delegateDid: 'did:imajin:agent',
+    });
+    expect(mocks.findFirstMock).not.toHaveBeenCalled();
+    expect(mocks.deleteMock).not.toHaveBeenCalled();
+  });
+
+  it('lets the owner themself through the delegation policy', async () => {
+    mocks.authenticateMock.mockResolvedValue({
+      auth: { did: 'did:imajin:creator', actingFor: undefined, scopes: [], via: 'cookie' },
+    });
+
+    expect((await DELETE(makeRequest('DELETE'), PROPS)).status).toBe(200);
+  });
+
   it('deletes the owner’s page', async () => {
     const res = await DELETE(makeRequest('DELETE'), PROPS);
 
