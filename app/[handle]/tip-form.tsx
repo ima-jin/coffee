@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useToast } from '@ima-jin/ui';
 import { withBasePath } from '@/lib/base-path';
+import { NO_CARD_RAIL_MESSAGE, SELLER_NO_CARD_RAIL, tipPayState } from '@/lib/card-rail';
 
 interface FundDirection {
   id: string;
@@ -37,6 +38,8 @@ export default function TipForm({ page, primaryColor, sellerConnected = true }: 
   const [paymentMethod, setPaymentMethod] = useState<'stripe' | 'solana'>(
     page.paymentMethods.stripe?.enabled && sellerConnected ? 'stripe' : 'solana'
   );
+  // Set when pay refuses a card checkout because the page owner has no card rail.
+  const [cardRefused, setCardRefused] = useState(false);
   const [isRecurring, setIsRecurring] = useState(false);
   const [fundDirection, setFundDirection] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
@@ -45,10 +48,15 @@ export default function TipForm({ page, primaryColor, sellerConnected = true }: 
   const fundDirections = page.fundDirections || [];
 
   const presets = page.presets || [100, 500, 1000];
-  const hasStripe = page.paymentMethods.stripe?.enabled;
-  const hasSolana = page.paymentMethods.solana?.enabled;
-  // Stripe only available when the page owner has completed Stripe Connect setup
-  const stripeAvailable = hasStripe && sellerConnected;
+  const hasStripe = !!page.paymentMethods.stripe?.enabled;
+  const hasSolana = !!page.paymentMethods.solana?.enabled;
+  // Card only when the page owner has connected their own Stripe key; otherwise hide it and say so plainly.
+  const { stripeAvailable, cardMissing, canSubmit, nothingEnabled } = tipPayState({
+    hasStripe,
+    hasSolana,
+    sellerConnected,
+    cardRefused,
+  });
 
   const getAmount = () => {
     if (customAmount) {
@@ -92,6 +100,12 @@ export default function TipForm({ page, primaryColor, sellerConnected = true }: 
       const data = await response.json();
 
       if (!response.ok) {
+        if (data.code === SELLER_NO_CARD_RAIL) {
+          // The page owner has no card rail: hide the card option; the plain message takes its place.
+          setCardRefused(true);
+          setPaymentMethod('solana');
+          return;
+        }
         throw new Error(data.error || 'Failed to process tip');
       }
 
@@ -274,12 +288,18 @@ export default function TipForm({ page, primaryColor, sellerConnected = true }: 
         <p className="text-red-500 text-sm text-center">{error}</p>
       )}
 
+      {/* The page offers cards but the owner cannot take them */}
+      {cardMissing && (
+        <p className="text-center text-sm text-gray-500 italic py-2">{NO_CARD_RAIL_MESSAGE}</p>
+      )}
+
       {/* Submit or unavailable message */}
-      {!stripeAvailable && !hasSolana ? (
+      {nothingEnabled && (
         <p className="text-center text-sm text-gray-500 italic py-2">
           Payments not yet available
         </p>
-      ) : (
+      )}
+      {canSubmit && (
         <button
           type="submit"
           disabled={isLoading || getAmount() < 100}

@@ -65,17 +65,17 @@ export default async function CoffeePage(props: Readonly<PageProps>) {
     notFound();
   }
 
-  // Check if the page owner has Stripe Connect enabled
+  // Can the page owner take a card payment? (their own connected Stripe key — there is no Stripe Connect)
   let sellerConnected = true;
   try {
     // Pay is a kernel service; its public base URL comes from PAY_SERVICE_URL.
     const checkRes = await fetch(
-      `${payServiceUrl()}/api/connect/check?did=${encodeURIComponent(page.did)}`,
+      `${payServiceUrl()}/api/card-rail/check?did=${encodeURIComponent(page.did)}`,
       { cache: 'no-store' }
     );
     if (checkRes.ok) {
       const checkData = await checkRes.json();
-      sellerConnected = checkData.chargesEnabled ?? false;
+      sellerConnected = checkData.cardEnabled ?? false;
     }
   } catch {
     // Default to connected so we don't block tips on error

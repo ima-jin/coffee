@@ -250,6 +250,62 @@ describe('POST /api/tip — stripe', () => {
     expect(mocks.valuesMock).not.toHaveBeenCalled();
   });
 
+  describe('card rail refusals (#2773)', () => {
+    function payRefuses(body: unknown, status: number) {
+      mocks.fetchMock.mockResolvedValue({ ok: false, status, text: async () => JSON.stringify(body) });
+    }
+
+    it('answers a page owner with no card rail with a plain 400 and the code, and records nothing', async () => {
+      payRefuses({ error: "This seller hasn't set up card payments", code: 'SELLER_NO_CARD_RAIL' }, 400);
+
+      const res = await POST(makeRequest(STRIPE_BODY));
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: "Card payments aren't set up for this page yet. Try another way to tip, or contact the page owner.",
+        code: 'SELLER_NO_CARD_RAIL',
+      });
+      expect(mocks.valuesMock).not.toHaveBeenCalled();
+    });
+
+    it.each(['CARD_RAIL_KEY_MISSING', 'CARD_RAIL_KEY_REJECTED', 'CARD_RAIL_UNAVAILABLE', 'CARD_RAIL_REQUEST_REJECTED'])(
+      'answers %s with a plain 502 that names the owner\'s Stripe account',
+      async (code) => {
+        payRefuses({ error: 'x', code }, 502);
+
+        const res = await POST(makeRequest(STRIPE_BODY));
+
+        expect(res.status).toBe(502);
+        expect(await res.json()).toEqual({
+          error: "Card payment couldn't be started on the page owner's Stripe account. Please try again later or contact the page owner.",
+          code,
+        });
+        expect(mocks.valuesMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it('answers a monthly card tip (SUBSCRIPTION_NOT_SUPPORTED) with a plain 400 telling the tipper to send a one-time tip', async () => {
+      payRefuses({ error: "Subscriptions can't be charged on a seller's own Stripe account", code: 'SUBSCRIPTION_NOT_SUPPORTED' }, 400);
+
+      const res = await POST(makeRequest({ ...STRIPE_BODY, recurring: true }));
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: "Monthly card tips aren't available yet. Please send a one-time tip instead.",
+        code: 'SUBSCRIPTION_NOT_SUPPORTED',
+      });
+    });
+
+    it('keeps the generic 500 for an unrelated pay error code', async () => {
+      payRefuses({ error: 'boom', code: 'SOMETHING_ELSE' }, 500);
+
+      const res = await POST(makeRequest(STRIPE_BODY));
+
+      expect(res.status).toBe(500);
+      expect((await res.json()).error).toBe('Failed to create payment');
+    });
+  });
+
   it('returns 500 when PAY_SERVICE_URL is not configured', async () => {
     vi.stubEnv('PAY_SERVICE_URL', '');
 
