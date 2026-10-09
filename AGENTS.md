@@ -200,7 +200,7 @@ Full text: `ima-jin/conventions/ISSUE-CONVENTIONS.md`. This §7 is kept in sync 
 
 - **What it is:** Coffee — tip pages linked to a DID; supporters tip a page owner (Stripe / Solana).
 - **App DID:** _<did:imajin:… — set at registration, see docs/REGISTRATION.md>_
-- **Scopes:** none required — routes authenticate through `authenticate()` (`requireSessionOrAppToken`, `aud` = this app's host).
+- **Scopes:** none required — routes authenticate through `authenticate()` (`requireSessionOrAppToken`, `aud` = this app's registry slug `coffee`, never its host; `IMAJIN_APP_AUD` overrides).
 - **Domain:** _<set at registration>_
 - **Database:** own Postgres schema `coffee` (`APP_DB_SCHEMA=coffee`), tables `pages` and `tips`. Migrations in
   `migrations/`; see `docs/MIGRATIONS.md`.

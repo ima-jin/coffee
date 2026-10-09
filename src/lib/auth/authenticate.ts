@@ -1,7 +1,7 @@
 import { requireSessionOrAppToken } from '@ima-jin/auth';
 import { getSession } from '@ima-jin/auth-client';
 import { authConfig } from '@/lib/auth-config';
-import { thisAppHost } from '@/lib/env';
+import { APP_SLUG } from '@/lib/env';
 
 /**
  * This app's entire inbound-auth surface, funneled through one function so
@@ -10,8 +10,11 @@ import { thisAppHost } from '@/lib/env';
  *
  * Order of evidence:
  *   1. `Authorization: Bearer <scoped app token>` — minted by the kernel at
- *      `POST {kernel}/auth/api/tokens/app` for `aud = thisAppHost()` and
- *      verified through `requireSessionOrAppToken` (@ima-jin/auth). This is
+ *      `POST {kernel}/auth/api/tokens/app` for `aud = <registry slug>` and
+ *      verified through `requireSessionOrAppToken` (@ima-jin/auth). The
+ *      audience is this app's registry slug (`coffee`, or `IMAJIN_APP_AUD`),
+ *      never the host it is served from: path-routed apps share one host, so a
+ *      host audience would let apps accept each other's tokens (#2706). This is
  *      the preferred, end-to-end path (#1974 / #1069 Phase 1).
  *   2. The legacy shared kernel session cookie, which the same
  *      `requireSessionOrAppToken` call accepts as a migration fallback.
@@ -27,6 +30,13 @@ export interface AuthenticatedCaller {
   did: string;
   /** Capability scopes granted to this call (empty on cookie paths). */
   scopes: string[];
+  /**
+   * Owner DID when the caller is an agent acting under `X-Acting-For`; feeds the
+   * delegation policy (#2360). No path of this adapter sets it today — the
+   * scoped-token and cookie paths carry no delegation overlay — so the policy
+   * only engages once one does.
+   */
+  actingFor?: string;
   /** Which path authenticated this request — for logging/debugging only. */
   via: 'token' | 'cookie' | 'session';
 }
@@ -44,7 +54,7 @@ async function readOwnSession(): Promise<string | null> {
 }
 
 export async function authenticate(request: Request): Promise<AuthenticateResult> {
-  const result = await requireSessionOrAppToken(request, { aud: thisAppHost() });
+  const result = await requireSessionOrAppToken(request, { slug: APP_SLUG });
   if ('auth' in result) {
     return { auth: result.auth };
   }

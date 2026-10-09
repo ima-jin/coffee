@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { createLogger } from '@ima-jin/logger';
 import { db, coffeePages } from '@/db';
+import { enforceRoutePolicy } from '@ima-jin/auth/delegation-policy';
 import { authenticate } from '@/lib/auth/authenticate';
 import { jsonResponse, errorResponse } from '@/lib/utils';
 
@@ -124,6 +125,15 @@ export async function DELETE(request: NextRequest, props: Readonly<RouteParams>)
   }
 
   const did = authResult.auth.did;
+
+  // Deleting a page is irreversible: a delegate (an agent acting for the owner)
+  // may propose it but never execute it (#2360).
+  const delegationDenied = enforceRoutePolicy(
+    { id: did, actingFor: authResult.auth.actingFor },
+    'coffee.page.delete',
+    { resourceId: handle },
+  );
+  if (delegationDenied) return delegationDenied;
 
   try {
     // Fetch existing page

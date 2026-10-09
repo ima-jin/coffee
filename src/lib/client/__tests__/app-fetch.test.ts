@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 describe('appFetch', () => {
-  it("mints a token for this app's host and sends it as a Bearer credential", async () => {
+  it("mints a token for this app's registry slug and sends it as a Bearer credential", async () => {
     fetchMock
       .mockResolvedValueOnce(mintResponse({ token: 'tok-1', expiresIn: 600 }))
       .mockResolvedValueOnce({ ok: true });
@@ -33,13 +33,24 @@ describe('appFetch', () => {
     const [mintUrl, mintInit] = fetchMock.mock.calls[0];
     expect(mintUrl).toBe('https://kernel.test/auth/api/tokens/app');
     expect(mintInit.method).toBe('POST');
-    expect(JSON.parse(mintInit.body)).toEqual({ aud: 'coffee.test', scopes: [] });
+    expect(JSON.parse(mintInit.body)).toEqual({ aud: 'coffee', scopes: [] });
 
     const [url, init] = fetchMock.mock.calls[1];
     expect(url).toBe('/api/pages/mine');
     expect(init.credentials).toBe('include');
     expect(init.headers.get('Authorization')).toBe('Bearer tok-1');
     expect(init.headers.get('Accept')).toBe('application/json');
+  });
+
+  it('mints for NEXT_PUBLIC_IMAJIN_APP_AUD when the operator overrides the audience', async () => {
+    vi.stubEnv('NEXT_PUBLIC_IMAJIN_APP_AUD', 'coffee-dev');
+    fetchMock
+      .mockResolvedValueOnce(mintResponse({ token: 'tok-1', expiresIn: 600 }))
+      .mockResolvedValueOnce({ ok: true });
+
+    await appFetch('/api/pages/mine');
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ aud: 'coffee-dev', scopes: [] });
   });
 
   it('prefixes the basePath and reuses a cached token until it nears expiry', async () => {

@@ -15,19 +15,18 @@ const request = new Request('https://coffee.imajin.ai/api/pages/mine');
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://coffee.imajin.ai');
   mocks.getSessionMock.mockResolvedValue(null);
 });
 
 describe('authenticate', () => {
-  it("verifies scoped app tokens against this app's own host as the audience", async () => {
+  it("verifies scoped app tokens against this app's registry slug, never its host (#2706)", async () => {
     mocks.requireSessionOrAppTokenMock.mockResolvedValue({
       auth: { did: 'did:imajin:alice', scopes: ['profile:read'], via: 'token' },
     });
 
     const result = await authenticate(request);
 
-    expect(mocks.requireSessionOrAppTokenMock).toHaveBeenCalledWith(request, { aud: 'coffee.imajin.ai' });
+    expect(mocks.requireSessionOrAppTokenMock).toHaveBeenCalledWith(request, { slug: 'coffee' });
     expect(result).toEqual({ auth: { did: 'did:imajin:alice', scopes: ['profile:read'], via: 'token' } });
     expect(mocks.getSessionMock).not.toHaveBeenCalled();
   });

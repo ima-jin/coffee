@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { payServiceUrl, publicAppUrl, thisAppHost, webhookSecret } from '../env';
+import { APP_SLUG, payServiceUrl, publicAppUrl, webhookSecret } from '../env';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -33,23 +33,11 @@ describe('webhookSecret', () => {
   });
 });
 
-describe('thisAppHost', () => {
-  it("derives the host from NEXT_PUBLIC_APP_URL (the token audience)", () => {
+describe('APP_SLUG', () => {
+  it("is coffee's registry slug — the audience, independent of the host it is served from (#2706)", () => {
     vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://dev-coffee.imajin.ai:8443/path');
 
-    expect(thisAppHost()).toBe('dev-coffee.imajin.ai:8443');
-  });
-
-  it('falls back to the production host when unset', () => {
-    vi.stubEnv('NEXT_PUBLIC_APP_URL', '');
-
-    expect(thisAppHost()).toBe('coffee.imajin.ai');
-  });
-
-  it('falls back to the production host when the URL is malformed', () => {
-    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'not a url');
-
-    expect(thisAppHost()).toBe('coffee.imajin.ai');
+    expect(APP_SLUG).toBe('coffee');
   });
 });
 

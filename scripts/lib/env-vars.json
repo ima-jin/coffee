@@ -92,7 +92,7 @@
     "name": "NEXT_PUBLIC_APP_URL",
     "status": "required",
     "phase": "runtime",
-    "summary": "This app's public origin (no base path). Its HOST is the `aud` used to verify scoped app tokens — it must match a host in this app's registered tokenAudiences — and the origin of Stripe success/cancel redirects.",
+    "summary": "This app's public origin (no base path). The origin of Stripe success/cancel redirects and OpenGraph URLs. It is NOT the token audience: scoped app tokens are verified against the registry slug (see IMAJIN_APP_AUD).",
     "dev": "https://dev-jin.imajin.ai",
     "prod": "https://jin.imajin.ai"
   },
@@ -162,6 +162,22 @@
     "summary": "One-time code from the kernel operator's /jin approval card. Needed only on the very first boot (no keystore yet) or a lost-keystore rebind; delete it after the first successful boot.",
     "dev": "(only on first boot)",
     "prod": "(only on first boot)"
+  },
+  {
+    "name": "IMAJIN_APP_AUD",
+    "status": "optional",
+    "phase": "runtime",
+    "summary": "Operator override of the audience scoped app tokens are verified against (read by @ima-jin/auth; default: this app's registry slug `coffee`). Must be a registry slug, never a host or URL — path-routed apps share one host (#2706). Unset on dev and prod unless the registry slug differs.",
+    "dev": "(unset)",
+    "prod": "(unset)"
+  },
+  {
+    "name": "NEXT_PUBLIC_IMAJIN_APP_AUD",
+    "status": "optional",
+    "phase": "build",
+    "summary": "Browser-side twin of IMAJIN_APP_AUD: the audience the dashboard/edit pages request when minting a scoped app token (default `coffee`). Set it to the same value as IMAJIN_APP_AUD, and only when that is set. Baked at build time; rebuild after changing.",
+    "dev": "(unset)",
+    "prod": "(unset)"
   },
   {
     "name": "IMAJIN_APP_KEYSTORE",
