@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { APP_SLUG, payServiceUrl, publicAppUrl, webhookSecret } from '../env';
+import { APP_SLUG, payServiceUrl, publicAppUrl } from '../env';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -16,20 +16,6 @@ describe('payServiceUrl', () => {
     vi.stubEnv('PAY_SERVICE_URL', '');
 
     expect(() => payServiceUrl()).toThrow('PAY_SERVICE_URL is not set');
-  });
-});
-
-describe('webhookSecret', () => {
-  it('returns the configured secret', () => {
-    vi.stubEnv('WEBHOOK_SECRET', 's3cret');
-
-    expect(webhookSecret()).toBe('s3cret');
-  });
-
-  it('returns undefined when unset or empty', () => {
-    vi.stubEnv('WEBHOOK_SECRET', '');
-
-    expect(webhookSecret()).toBeUndefined();
   });
 });
 

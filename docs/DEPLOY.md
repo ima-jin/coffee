@@ -71,9 +71,10 @@ Dev and prod are separate identities: each has its own app DID, claim code, keys
    placeholder. No key material is ever written to the repo, the env file, or the logs.
 2. **Create the databases/roles** and put the connection strings in each `.env.local`. Prod/dev already contain
    the `coffee` schema with real tips data; the baseline adopts it in place.
-3. **Provision the remaining secrets through the approved secret tools** — `SESSION_SECRET` and the matching
-   pay service's `WEBHOOK_SECRET`. Never hand-generate or copy values in a shell. Their vault migration is
-   separate kernel work; if the required tool is unavailable, stop rather than working around it.
+3. **Provision the session credential through the approved secret tool** — `SESSION_SECRET`.
+   Never hand-generate or copy values in a shell. Its vault migration is separate kernel work;
+   if the required tool is unavailable, stop rather than working around it.
+   The kernel signs payment callbacks; coffee verifies public keys. No shared callback credential is needed.
    Settlement needs no key in the env: coffee settles with its own app-service token. The operator must **approve the
    `pay:settle` service scope for this app's DID** (propose it via `POST /api/apps/service-scopes`, countersign on the
    `apps:service-scopes` card on `/jin`) — until then the token mint drops the scope and pay refuses checkout and settle.
@@ -165,6 +166,32 @@ dev-jin.imajin.ai {
 ```
 
 Verify: `curl -fsS https://jin.imajin.ai/coffee/api/health` → `{"status":"ok","service":"coffee",…}`.
+
+## Kernel-signed payment callbacks
+
+Deploy a kernel that signs callbacks before upgrading this receiver. The kernel signs; coffee verifies
+with `verifyKernelWebhook` from `@ima-jin/auth/kernel-webhook` (published SDK 0.8.18). No shared
+callback credential is provisioned, generated or copied. The trusted local `IMAJIN_APP_DID` is the
+recipient audience; `AUTH_SERVICE_URL` points at this environment's kernel auth service. The SDK
+discovers public keys at `{AUTH_SERVICE_URL}/.well-known/kernel-signing-key` over HTTPS and pins
+them on first use. Subsequent rotation requires overlap with pinned keys; never delete pins to
+work around a trust failure.
+
+Keep `data/kernel-webhook-pins/` under the process cwd on persistent, writable storage, separate
+per environment and preserved across deploys/rollbacks. These files contain only public keys.
+The host must supply trusted Linux `/usr/bin/flock` (util-linux); missing tooling, discovery or
+storage failures fail closed with 503 and no business processing. Signature, audience, freshness
+and replay failures return 401; correctly signed non-JSON bodies return 400.
+
+The existing pm2 entry uses one fork worker. The SDK's atomic process-wide nonce store rejects
+duplicate deliveries within its inclusive ±300-second freshness window. Retries need a new nonce
+and signature. Replay memory does not survive a process restart: to retain replay evidence across
+restarts, or **before adding workers/replicas**, inject a shared durable
+`KernelWebhookNonceStore` via the verifier's `nonceStore` option, with atomic insert-if-absent and
+expiry semantics. Do not scale this configuration without that adapter.
+
+The signed path includes the public `/coffee` prefix and query string. Caddy must keep that prefix
+intact as above; neither proxy nor app may rewrite signed body bytes or signature headers.
 
 ## Rollback
 

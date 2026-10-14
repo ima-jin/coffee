@@ -36,7 +36,7 @@
     "name": "AUTH_SERVICE_URL",
     "status": "required",
     "phase": "runtime",
-    "summary": "Kernel auth service base URL, including the /auth prefix. Read by @ima-jin/auth to verify scoped app tokens and sessions.",
+    "summary": "Kernel auth service base URL, including the /auth prefix. Read by @ima-jin/auth to verify scoped app tokens, sessions and kernel-signed webhooks through public signing-key discovery.",
     "dev": "https://dev-jin.imajin.ai/auth",
     "prod": "https://jin.imajin.ai/auth"
   },
@@ -120,15 +120,6 @@
     "summary": "Secret used to sign this app's HS256 session cookie. Provision through the approved secret tool; distinct for dev and prod; never hand-generate or commit.",
     "dev": "(approved secret tool)",
     "prod": "(approved secret tool)"
-  },
-  {
-    "name": "WEBHOOK_SECRET",
-    "status": "required",
-    "phase": "runtime",
-    "secret": true,
-    "summary": "Shared secret the kernel pay service presents on POST /api/webhook/payment (Authorization: Bearer …). Unset -> the webhook answers 500 and tips never complete.",
-    "dev": "(the dev pay service's webhook secret)",
-    "prod": "(the prod pay service's webhook secret)"
   },
   {
     "name": "PLATFORM_DID",

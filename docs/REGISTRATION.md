@@ -129,6 +129,15 @@ If the local keystore is ever lost (disk wipe, redeploy to a fresh host), ask th
 to re-approve `apps.provision` with `reissueClaim: true` for a fresh claim code — redeeming it also
 revokes the lost keystore's bootstrap key. Redeem the fresh code only on `/coffee/claim`.
 
+## Kernel payment notifications
+
+The kernel signs payment callbacks and coffee verifies them with the published SDK's
+`verifyKernelWebhook`. Set the public `IMAJIN_APP_DID` from registration and the matching
+`AUTH_SERVICE_URL`; do not generate or exchange a shared callback credential. The webhook
+audience is the app DID, not the scoped-token audience slug. Public key discovery, persistent
+pins, replay storage and proxy requirements are covered in
+[Deploying coffee](./DEPLOY.md#kernel-signed-payment-callbacks).
+
 ## 5. List or manage your apps later
 
 ```bash

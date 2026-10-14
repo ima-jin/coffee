@@ -1,4 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { canonicalKernelWebhookPayload } from '@ima-jin/auth/kernel-webhook';
 
 const mocks = vi.hoisted(() => {
   const whereMock = vi.fn().mockResolvedValue(undefined);
@@ -26,7 +31,30 @@ vi.mock('@/lib/settle', () => ({ settleTip: mocks.settleTipMock }));
 
 import { POST } from '../route';
 
-const SECRET = 'webhook-secret';
+// Only ephemeral test keys: the real published SDK verifies every request.
+const signingKey = generateKeyPairSync('ed25519');
+const foreignKey = generateKeyPairSync('ed25519');
+const publicKey = signingKey.publicKey.export({ format: 'der', type: 'spki' }).subarray(-32).toString('hex');
+const kid = `auth-${createHash('sha256').update(publicKey).digest('hex').slice(0, 16)}`;
+const audience = 'did:imajin:coffee-test';
+const callbackUrl = 'https://coffee.test/coffee/api/webhook/payment';
+const directory = mkdtempSync(join(tmpdir(), 'coffee-kernel-webhook-'));
+const discovery = vi.fn();
+
+beforeAll(() => {
+  // Exercise the SDK's real file pin store without persisting pins in the checkout.
+  vi.spyOn(process, 'cwd').mockReturnValue(directory);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
+
+afterAll(() => {
+  vi.restoreAllMocks();
+  rmSync(directory, { recursive: true, force: true });
+});
 
 const MANIFEST = {
   chain: [
@@ -37,40 +65,175 @@ const MANIFEST = {
 
 const TIP = { id: 'tip_1', payTransactionId: 'tx_1', payeeManifest: MANIFEST, settledAt: null };
 
-function makeRequest(body: unknown, authorization: string | null = `Bearer ${SECRET}`): Parameters<typeof POST>[0] {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (authorization !== null) headers.authorization = authorization;
-  return new Request('https://coffee.test/api/webhook/payment', {
+function makeRequest(body: unknown, options: {
+  timestampOffsetSeconds?: number;
+  audience?: string;
+  privateKey?: typeof signingKey.privateKey;
+  url?: string;
+  method?: string;
+} = {}): Parameters<typeof POST>[0] {
+  const rawBody = typeof body === 'string' ? body : JSON.stringify(body);
+  const timestamp = String(Math.floor(Date.now() / 1000) + (options.timestampOffsetSeconds ?? 0));
+  const nonce = randomUUID();
+  const recipient = options.audience ?? audience;
+  const url = options.url ?? callbackUrl;
+  const method = options.method ?? 'POST';
+  const payload = canonicalKernelWebhookPayload({ audience: recipient, timestamp, nonce, method, url, rawBody });
+  const signature = sign(null, Buffer.from(payload), options.privateKey ?? signingKey.privateKey).toString('hex');
+  return new Request(url, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      'x-kernel-audience': recipient,
+      'x-kernel-timestamp': timestamp,
+      'x-kernel-nonce': nonce,
+      'x-kernel-kid': kid,
+      'x-kernel-signature': signature,
+    },
+    body: rawBody,
+  }) as Parameters<typeof POST>[0];
+}
+
+function changedRequest(request: Request, changes: { body?: string; url?: string; method?: string }): Parameters<typeof POST>[0] {
+  return new Request(changes.url ?? request.url, {
+    method: changes.method ?? request.method,
+    headers: request.headers,
+    body: changes.body ?? JSON.stringify({ type: 'payment.succeeded', tipId: 'tip_1' }),
+  }) as Parameters<typeof POST>[0];
+}
+
+function expectNoSideEffects(): void {
+  expect(mocks.updateMock).not.toHaveBeenCalled();
+  expect(mocks.findTipMock).not.toHaveBeenCalled();
+  expect(mocks.settleTipMock).not.toHaveBeenCalled();
+  expect(mocks.log.info).not.toHaveBeenCalled();
+  expect(mocks.log.warn).not.toHaveBeenCalled();
+  expect(mocks.log.error).not.toHaveBeenCalled();
+}
+
+function unsignedRequest(body: string): Parameters<typeof POST>[0] {
+  return new Request(callbackUrl, {
     method: 'POST',
-    headers,
-    body: typeof body === 'string' ? body : JSON.stringify(body),
+    body,
   }) as Parameters<typeof POST>[0];
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.stubEnv('WEBHOOK_SECRET', SECRET);
+  vi.stubEnv('IMAJIN_APP_DID', audience);
+  vi.stubEnv('AUTH_SERVICE_URL', 'https://kernel.test/auth');
+  discovery.mockResolvedValue(Response.json({
+    current: kid,
+    keys: [{ kid, publicKey, algorithm: 'Ed25519', validFrom: new Date(0).toISOString() }],
+  }));
+  // A fresh Response on every discovery (Response bodies are single-use).
+  vi.stubGlobal('fetch', (...args: unknown[]) => discovery(...args).then((response: Response) => response.clone()));
   mocks.whereMock.mockResolvedValue(undefined);
   mocks.findTipMock.mockResolvedValue({ ...TIP });
   mocks.settleTipMock.mockResolvedValue('settled');
 });
 
 describe('POST /api/webhook/payment — authentication', () => {
-  it('answers 500 when no webhook secret is configured', async () => {
-    vi.stubEnv('WEBHOOK_SECRET', '');
-
-    const res = await POST(makeRequest({ tipId: 'tip_1' }));
-
-    expect(res.status).toBe(500);
-    expect(await res.json()).toEqual({ error: 'Webhook not configured' });
+  it('accepts a valid kernel signature and processes the callback', async () => {
+    const res = await POST(makeRequest({ type: 'payment.succeeded', tipId: 'tip_1' }));
+    expect(res.status).toBe(200);
+    expect(mocks.updateMock).toHaveBeenCalled();
+    expect(discovery).toHaveBeenCalledWith('https://kernel.test/auth/.well-known/kernel-signing-key', expect.any(Object));
+  });
+  it('rejects unsigned malformed JSON before parsing or business side effects', async () => {
+    const res = await POST(unsignedRequest('not json'));
+    expect(res.status).toBe(401);
+    expectNoSideEffects();
   });
 
-  it.each([null, 'Bearer wrong', SECRET, `Bearer ${SECRET}x`])('rejects authorization %j with 401', async (header) => {
-    const res = await POST(makeRequest({ tipId: 'tip_1' }, header));
+  it('does not accept a legacy Bearer instead of a kernel signature', async () => {
+    const request = unsignedRequest(JSON.stringify({ type: 'payment.succeeded', tipId: 'tip_1' }));
+    request.headers.set('authorization', 'Bearer FAKE_LEGACY_PLACEHOLDER');
+    expect((await POST(request)).status).toBe(401);
+    expectNoSideEffects();
+  });
 
+  it.each([
+    ['x-kernel-signature', '0'.repeat(128)],
+    ['x-kernel-nonce', randomUUID()],
+    ['x-kernel-timestamp', String(Math.floor(Date.now() / 1000) - 10)],
+  ])('rejects a tampered %s header', async (header, value) => {
+    const request = makeRequest({ type: 'payment.succeeded', tipId: 'tip_1' });
+    request.headers.set(header, value);
+    expect((await POST(request)).status).toBe(401);
+    expectNoSideEffects();
+  });
+
+  it('rejects an unknown kernel key without business side effects', async () => {
+    // Separate trusted namespace avoids the SDK's intentional refresh throttle.
+    vi.stubEnv('AUTH_SERVICE_URL', 'https://unknown-key-kernel.test/auth');
+    const request = makeRequest({ type: 'payment.succeeded', tipId: 'tip_1' });
+    request.headers.set('x-kernel-kid', `auth-${'0'.repeat(16)}`);
+    expect((await POST(request)).status).toBe(401);
+    expectNoSideEffects();
+  });
+
+  it('fails closed without exposing discovery errors or performing business side effects', async () => {
+    vi.stubEnv('AUTH_SERVICE_URL', 'https://offline-kernel.test/auth');
+    discovery.mockRejectedValue(new Error('internal discovery details'));
+    const res = await POST(makeRequest({ type: 'payment.succeeded', tipId: 'tip_1' }));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'Webhook verification unavailable' });
+    expectNoSideEffects();
+  });
+  it.each(['x-kernel-audience', 'x-kernel-timestamp', 'x-kernel-nonce', 'x-kernel-kid', 'x-kernel-signature'])(
+    'rejects a missing %s header', async (header) => {
+      const request = makeRequest({ tipId: 'tip_1' });
+      request.headers.delete(header);
+      expect((await POST(request)).status).toBe(401);
+      expectNoSideEffects();
+    },
+  );
+
+  it.each(['missing', 'malformed'] as const)('fails closed with %s local audience configuration', async (configuration) => {
+    vi.stubEnv('IMAJIN_APP_DID', configuration === 'missing' ? undefined : 'coffee');
+    const res = await POST(makeRequest({ tipId: 'tip_1' }));
     expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ error: 'Unauthorized' });
-    expect(mocks.updateMock).not.toHaveBeenCalled();
+    expectNoSideEffects();
+  });
+
+  it.each([
+    ['a foreign recipient', { audience: 'did:imajin:another-app' }],
+    ['a wrong signing key', { privateKey: foreignKey.privateKey }],
+    ['an expired timestamp', { timestampOffsetSeconds: -301 }],
+    ['a future timestamp', { timestampOffsetSeconds: 301 }],
+  ])('rejects %s', async (_label, options) => {
+    const res = await POST(makeRequest({ type: 'payment.succeeded', tipId: 'tip_1' }, options));
+    expect(res.status).toBe(401);
+    expectNoSideEffects();
+  });
+
+  it.each([
+    ['body bytes', { body: '{ "type": "payment.succeeded", "tipId": "tip_1" }' }],
+    ['path', { url: 'https://coffee.test/api/webhook/payment' }],
+    ['query', { url: `${callbackUrl}?changed=true` }],
+    ['method', { method: 'PUT' }],
+  ])('rejects tampered %s', async (_label, changes) => {
+    const request = makeRequest({ type: 'payment.succeeded', tipId: 'tip_1' });
+    const res = await POST(changedRequest(request, changes));
+    expect(res.status).toBe(401);
+    expectNoSideEffects();
+  });
+
+  it('rejects a replay without repeating any business side effects', async () => {
+    const request = makeRequest({ type: 'payment.succeeded', tipId: 'tip_1' });
+    const replay = request.clone() as Parameters<typeof POST>[0];
+    expect((await POST(request)).status).toBe(200);
+    vi.clearAllMocks();
+    expect((await POST(replay)).status).toBe(401);
+    expectNoSideEffects();
+  });
+
+  it('rejects a malformed signature without business side effects', async () => {
+    const request = makeRequest({ tipId: 'tip_1' });
+    request.headers.set('x-kernel-signature', 'not-a-signature');
+    expect((await POST(request)).status).toBe(401);
+    expectNoSideEffects();
   });
 });
 
@@ -242,9 +405,10 @@ describe('POST /api/webhook/payment — events', () => {
     expect(await res.json()).toEqual({ error: 'Webhook handler failed' });
   });
 
-  it('returns 500 when the body is not valid JSON', async () => {
+  it('returns 400 when a correctly signed body is not valid JSON', async () => {
     const res = await POST(makeRequest('not json'));
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
+    expectNoSideEffects();
   });
 });

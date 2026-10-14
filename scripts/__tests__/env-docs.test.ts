@@ -37,6 +37,11 @@ function envNamesIn(source: string): string[] {
 
 describe('env contract coverage', () => {
   const manifest = new Set(ENV_VAR_NAMES);
+  it('pins both published auth SDK dependencies exactly to 0.8.18', () => {
+    const { dependencies } = JSON.parse(read('package.json')) as { dependencies: Record<string, string> };
+    expect(dependencies['@ima-jin/auth']).toBe('0.8.18');
+    expect(dependencies['@ima-jin/auth-client']).toBe('0.8.18');
+  });
 
   it('has no duplicate manifest entries and every entry is complete', () => {
     expect(new Set(ENV_VAR_NAMES).size).toBe(ENV_VAR_NAMES.length);
@@ -136,10 +141,9 @@ describe('validateEnv', () => {
     IMAJIN_APP_DID: 'did:imajin:abc123',
     NEXT_PUBLIC_IMAJIN_APP_ID: 'app_abc123',
     SESSION_SECRET: 'session-secret-value',
-    WEBHOOK_SECRET: 'webhook-secret-value',
     DATABASE_URL: 'postgres://coffee:pw@localhost:5432/db',
   };
-  const PLACEHOLDER_VARS = ['DATABASE_URL', 'IMAJIN_APP_DID', 'NEXT_PUBLIC_IMAJIN_APP_ID', 'SESSION_SECRET', 'WEBHOOK_SECRET'];
+  const PLACEHOLDER_VARS = ['DATABASE_URL', 'IMAJIN_APP_DID', 'NEXT_PUBLIC_IMAJIN_APP_ID', 'SESSION_SECRET'];
 
   it.each([
     ['dev', '.env.dev.example'],
@@ -230,7 +234,6 @@ describe('check-env CLI', () => {
       IMAJIN_APP_DID: 'did:imajin:abc123',
       NEXT_PUBLIC_IMAJIN_APP_ID: 'app_abc123',
       SESSION_SECRET: 'session-secret-value',
-      WEBHOOK_SECRET: 'webhook-secret-value',
       IMAJIN_APP_CLAIM_CODE: 'FAKE_ENV_CLAIM_CODE',
       DATABASE_URL: 'postgres://coffee:pw@localhost:5432/db',
     });

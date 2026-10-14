@@ -47,7 +47,7 @@ redelivery (`tips.settled_at`, plus the kernel's `alreadySettled`).
 | `POST /api/tip` | optional | anonymous tips allowed; attributed to the caller's DID when authenticated |
 | `POST /api/checkout` | none | page-less support checkout (min $5) |
 | `GET /api/tips/{did}` | app token / session | owner only |
-| `POST /api/webhook/payment` | `WEBHOOK_SECRET` bearer | constant-time compare; called by the pay service |
+| `POST /api/webhook/payment` | kernel Ed25519 signature | SDK verifies app DID, raw body, method/path/query, timestamp and nonce before business side effects |
 
 ## Auth: the app-token contract (#1974)
 
