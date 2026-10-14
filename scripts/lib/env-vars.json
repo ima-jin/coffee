@@ -117,9 +117,9 @@
     "status": "required",
     "phase": "runtime",
     "secret": true,
-    "summary": "Secret used to sign this app's HS256 session cookie. Generate with `openssl rand -hex 32`; distinct for dev and prod; never committed.",
-    "dev": "(generate: openssl rand -hex 32)",
-    "prod": "(generate: openssl rand -hex 32)"
+    "summary": "Secret used to sign this app's HS256 session cookie. Provision through the approved secret tool; distinct for dev and prod; never hand-generate or commit.",
+    "dev": "(approved secret tool)",
+    "prod": "(approved secret tool)"
   },
   {
     "name": "WEBHOOK_SECRET",
@@ -153,15 +153,6 @@
     "summary": "Selects the kernel session cookie name in @ima-jin/config: `dev` → imajin_session_dev, anything else → imajin_session. MUST be `dev` on the dev instance (a production build is NODE_ENV=production, which does not imply dev); leave unset on prod.",
     "dev": "dev",
     "prod": "(unset)"
-  },
-  {
-    "name": "IMAJIN_APP_CLAIM_CODE",
-    "status": "first-boot",
-    "phase": "runtime",
-    "secret": true,
-    "summary": "One-time code from the kernel operator's /jin approval card. Needed only on the very first boot (no keystore yet) or a lost-keystore rebind; delete it after the first successful boot.",
-    "dev": "(only on first boot)",
-    "prod": "(only on first boot)"
   },
   {
     "name": "IMAJIN_APP_AUD",

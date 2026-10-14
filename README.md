@@ -36,8 +36,8 @@ The kernel verifies both and returns `{ appDid, userDid, scopes }` — that trip
    `NEXT_PUBLIC_IMAJIN_APP_ID`, `SESSION_SECRET`, `APP_DB_SCHEMA`, `DATABASE_URL`, and
    `IMAJIN_KERNEL_URL`. This app refuses to start without `IMAJIN_APP_DID` set, or if a raw
    `IMAJIN_APP_PRIVATE_KEY` is present (see `instrumentation.ts`) — it fetches its own signing key
-   at boot via `@ima-jin/auth-client`'s `loadAppSigningKey()` instead. **Skip `IMAJIN_APP_CLAIM_CODE`
-   for now**: the operator path is *approve on `/jin` → open `<this app>/claim` → paste the code →
+   at boot via `@ima-jin/auth-client`'s `loadAppSigningKey()` instead. The only claim path is
+   *approve on `/jin` → open `<this app>/claim` → paste the code →
    done* — see [`docs/REGISTRATION.md`](./docs/REGISTRATION.md).
 4. **Migrate this app's own database** (its own Postgres schema only — see
    [`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md)):
@@ -63,17 +63,14 @@ the kernel's claim flow. Nothing is hand-made, and no key material ever lands in
 2. **Mint a claim code** (operator step, on the kernel): open the `apps.provision` approval card on `/jin` for this
    app and approve it. It yields a **one-time claim code**. Use `reissueClaim: true` to get a fresh one after a
    lost keystore.
-3. **Spend it.** Either way the app redeems the code together with a freshly minted bootstrap keypair, and
+3. **Spend it in the browser.** The app redeems the code together with a freshly minted bootstrap keypair, and
    persists only that bootstrap keypair in the `0600` keystore (`IMAJIN_APP_KEYSTORE`). The signing key itself is
    memory-only.
-   - **Operator path (browser):** start the app with no claim code set — it boots in *unclaimed* mode, serving only
-     `/claim`, `/api/claim` and `/api/health`. Open `<app>/claim` and paste the code from the `/jin` approval card.
+   - Start the app without a keystore — it boots in *unclaimed* mode, serving only
+     `/claim`, `/api/claim` and `/api/health`. Open `/coffee/claim` and paste the code from the `/jin` approval card.
      The code is redeemed server-side (`POST /api/claim`), the keystore is written, and the app is live with no
      restart. `/claim` then 404s — the code is single-use. Failed attempts are rate-limited per client.
-   - **First-boot env path (CI / seal pipelines):** put the code in `.env.local` as `IMAJIN_APP_CLAIM_CODE` and start
-     the app (the normal [deploy](#deploy) does this). `instrumentation.ts` calls `@ima-jin/auth-client`'s
-     `loadAppSigningKey()` at boot.
-4. **Delete `IMAJIN_APP_CLAIM_CODE`** from `.env.local` if you used it — it is spent. Every later boot
+4. **Keep the keystore.** Every later boot
    re-authenticates with the keystore alone, so ordinary restarts need no operator action.
 
 ## Deploy
@@ -179,15 +176,14 @@ middleware.ts      ← gates every route on claim state — unclaimed page, /cla
 `app/claim/page.tsx` + `app/api/claim/route.ts` are the operator-facing claim page and its server
 route (#2427) — see "This app's own signing key" below.
 
-## This app's own signing key
+## This app's own signing key — operator claim page only
 
 This app never reads a raw private key from env. `instrumentation.ts` fails loud at boot if
 `IMAJIN_APP_PRIVATE_KEY` is set, and instead calls `@ima-jin/auth-client`'s `loadAppSigningKey()`.
-Without a claim code or keystore yet, this app boots in **unclaimed mode** (#2427): every route
+Without a keystore yet, this app boots in **unclaimed mode** (#2427): every route
 except `/claim`, `/api/claim`, and `/api/health` serves a minimal "not claimed yet" page. The
 operator path: approve provisioning on the kernel's `/jin` → open `<this app>/claim` → paste the
-one-time claim code → done — no ssh, no env edit, no restart. A one-time `IMAJIN_APP_CLAIM_CODE`
-env var still works for automated/CI deploys and takes precedence when set. Either path bootstraps
+one-time claim code → done — no ssh, no env edit, no restart. Only the browser claim page bootstraps
 a local `0600` keystore (`IMAJIN_APP_KEYSTORE`); every later boot re-authenticates with that
 keystore, no operator action needed. See
 [`docs/REGISTRATION.md`](./docs/REGISTRATION.md#4-claim-this-apps-own-signing-key-7-2427).

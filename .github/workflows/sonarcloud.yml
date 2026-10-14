@@ -44,8 +44,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
-  actions: read # to download the sonar-payload artifact from the triggering CI run
 
 jobs:
   sonarcloud-push:
@@ -117,6 +115,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   sonarcloud-pr:
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read # download the payload from the triggering CI run
     # Only for the CI workflow's own `pull_request` runs, and only once it
     # succeeded — a failing build/test means an incomplete picture (same
     # reasoning as the push job's coverage step above).

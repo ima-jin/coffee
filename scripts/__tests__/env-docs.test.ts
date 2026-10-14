@@ -72,7 +72,10 @@ describe('env contract coverage', () => {
       const dist = join(base, pkg, 'dist');
       for (const file of walk(dist)) {
         for (const name of envNamesIn(readFileSync(file, 'utf8'))) {
-          if (!manifest.has(name)) undocumented.push(`${name} (@ima-jin/${pkg})`);
+          // The SDK fallback is explicitly disabled by our empty claimCode
+          // boot option; it must not become an app env configuration entry.
+          const disabledClaimFallback = pkg === 'auth-client' && name === 'IMAJIN_APP_CLAIM_CODE';
+          if (!manifest.has(name) && !disabledClaimFallback) undocumented.push(`${name} (@ima-jin/${pkg})`);
         }
       }
     }
@@ -85,6 +88,22 @@ describe('env contract coverage', () => {
     for (const name of ENV_VAR_NAMES) {
       expect(example, `.env.example is missing ${name}`).toMatch(new RegExp(`^#?\\s*${name}=|^# ${name}\\b`, 'm'));
       expect(docs, `docs/ENVIRONMENTS.md is missing ${name}`).toContain(`\`${name}\``);
+    }
+  });
+
+  it('removes IMAJIN_APP_CLAIM_CODE from the env contract, runtime and all operator docs', () => {
+    expect(manifest.has('IMAJIN_APP_CLAIM_CODE')).toBe(false);
+    const files = [
+      '.env.example', '.env.dev.example', '.env.prod.example', 'README.md', 'AGENTS.md',
+      // check-env alone retains a names-only cleanup warning for stale env files.
+      'instrumentation.ts', 'middleware.ts', 'scripts/deploy.sh',
+      'scripts/lib/env-manifest.mjs', 'scripts/lib/env-vars.json',
+      ...walk(join(ROOT, 'app')), ...walk(join(ROOT, 'src')),
+      ...readdirSync(join(ROOT, 'docs')).filter((file) => file.endsWith('.md')).map((file) => `docs/${file}`),
+    ];
+    for (const file of files) {
+      const source = readFileSync(file.startsWith(ROOT) ? file : join(ROOT, file), 'utf8');
+      expect(source, file).not.toContain('IMAJIN_APP_CLAIM_CODE');
     }
   });
 
@@ -180,13 +199,12 @@ describe('validateEnv', () => {
     expect(errors).toMatch(/must start with did:imajin:/);
   });
 
-  it('warns (without failing) about first-boot, port and logging leftovers', () => {
+  it('warns about port and logging leftovers', () => {
     const { errors, warnings } = validateEnv(
-      { ...validProd(), IMAJIN_APP_CLAIM_CODE: 'once', PORT: '9999', LOG_DB_TRANSPORT: 'true' },
+      { ...validProd(), PORT: '9999', LOG_DB_TRANSPORT: 'true' },
       'prod',
     );
     expect(errors).toEqual([]);
-    expect(warnings.join('\n')).toMatch(/IMAJIN_APP_CLAIM_CODE is set/);
     expect(warnings.join('\n')).toMatch(/PORT is set/);
     expect(warnings.join('\n')).toMatch(/LOG_DB_TRANSPORT=true/);
   });
@@ -202,20 +220,28 @@ describe('check-env CLI', () => {
 
   const cli = (args: string[]) => spawnSync(process.execPath, [CHECK_ENV, ...args], { env: childEnv(), encoding: 'utf8', cwd: dir });
 
-  it('exits 0 for a valid file and prints names/messages only', () => {
+  it.each([
+    ['dev', '.env.dev.example'],
+    ['prod', '.env.prod.example'],
+  ] as const)('warns exactly once about an ignored stale claim code on %s, with zero errors and no value echoed', (target, example) => {
     const file = join(dir, 'ok.env');
     const filled = Object.entries({
-      ...parseEnv(read('.env.prod.example')),
+      ...parseEnv(read(example)),
       IMAJIN_APP_DID: 'did:imajin:abc123',
       NEXT_PUBLIC_IMAJIN_APP_ID: 'app_abc123',
       SESSION_SECRET: 'session-secret-value',
       WEBHOOK_SECRET: 'webhook-secret-value',
+      IMAJIN_APP_CLAIM_CODE: 'FAKE_ENV_CLAIM_CODE',
       DATABASE_URL: 'postgres://coffee:pw@localhost:5432/db',
     });
     writeFileSync(file, filled.map(([name, value]) => `${name}=${value}`).join('\n'));
-    const result = cli(['prod', '--file', file]);
+    const result = cli([target, '--file', file]);
     expect(result.status).toBe(0);
-    expect(result.stdout).toMatch(/is valid for prod/);
+    expect(result.stdout).toBe(`${file} is valid for ${target}.\n`);
+    expect(result.stderr).toBe(
+      'warn:  IMAJIN_APP_CLAIM_CODE is ignored — claim at /coffee/claim and delete IMAJIN_APP_CLAIM_CODE from the env file.\n',
+    );
+    expect(result.stdout + result.stderr).not.toContain('FAKE_ENV_CLAIM_CODE');
   });
 
   it('exits 1 for an invalid file without echoing any value', () => {

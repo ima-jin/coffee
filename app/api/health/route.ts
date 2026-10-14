@@ -19,7 +19,7 @@ export async function GET() {
     timestamp: new Date().toISOString(),
     migrations,
     // Unclaimed boot mode (#2427): false until an operator pastes a claim
-    // code at /claim (or IMAJIN_APP_CLAIM_CODE resolves it at boot).
+    // code at /claim, or a persisted keystore authenticates at boot.
     claimed: isAppClaimed(),
   });
 }

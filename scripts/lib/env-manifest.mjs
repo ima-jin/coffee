@@ -24,7 +24,6 @@ export const APP_SCHEMA = 'coffee';
 /**
  * status:
  *   required         must be set in the env file for a deployed instance
- *   first-boot       required only on the very first boot, then removed
  *   optional         read, has a safe default when unset
  *   forbidden        must NOT be set (the app refuses to boot if it is)
  *   runtime-set      injected by Next.js / pm2 — not set in the env file
@@ -41,7 +40,7 @@ export const APP_SCHEMA = 'coffee';
 /**
  * @typedef {object} EnvVar
  * @property {string} name
- * @property {'required' | 'first-boot' | 'optional' | 'forbidden' | 'runtime-set' | 'dependency' | 'template-unused'} status
+ * @property {'required' | 'optional' | 'forbidden' | 'runtime-set' | 'dependency' | 'template-unused'} status
  * @property {'build' | 'runtime' | 'script'} phase
  * @property {boolean} [secret]
  * @property {string} summary
@@ -174,9 +173,6 @@ function collectWarnings(get, target) {
   const port = get('PORT');
   if (port !== '' && port !== String(TARGETS[target].port)) {
     warnings.push(`PORT is set in the env file but ${TARGETS[target].name} runs on ${TARGETS[target].port}; the pm2 entry's value wins.`);
-  }
-  if (get('IMAJIN_APP_CLAIM_CODE') !== '') {
-    warnings.push('IMAJIN_APP_CLAIM_CODE is set — it is needed on the first boot only; remove it once the app has booted once.');
   }
   for (const name of ['ENABLE_APP_LOG', 'LOG_DB_TRANSPORT', 'ENABLE_REQUEST_LOG']) {
     if (get(name) === 'true') {

@@ -59,16 +59,15 @@ Missing any of these and `scripts/check-env.mjs` fails the deploy before anythin
 | `NEXT_PUBLIC_APP_URL` | runtime | `https://dev-jin.imajin.ai` | `https://jin.imajin.ai` | This app's public origin (no base path). The origin of Stripe success/cancel redirects and OpenGraph URLs. It is NOT the token audience: scoped app tokens are verified against the registry slug (see IMAJIN_APP_AUD). |
 | `IMAJIN_APP_DID` | runtime | `did:imajin:<dev app DID>` | `did:imajin:<prod app DID>` | This app's own did:imajin:… from registration (docs/REGISTRATION.md). instrumentation.ts refuses to boot without it. Not a secret. |
 | `NEXT_PUBLIC_IMAJIN_APP_ID` | build | `app_<dev registry id>` | `app_<prod registry id>` | This app's public registry id (`app_…`) from registration. Used client-side to build the sign-in redirect — safe to expose. Baked at build time. |
-| `SESSION_SECRET` **(secret)** | runtime | (generate: openssl rand -hex 32) | (generate: openssl rand -hex 32) | Secret used to sign this app's HS256 session cookie. Generate with `openssl rand -hex 32`; distinct for dev and prod; never committed. |
+| `SESSION_SECRET` **(secret)** | runtime | (approved secret tool) | (approved secret tool) | Secret used to sign this app's HS256 session cookie. Provision through the approved secret tool; distinct for dev and prod; never hand-generate or commit. |
 | `WEBHOOK_SECRET` **(secret)** | runtime | (the dev pay service's webhook secret) | (the prod pay service's webhook secret) | Shared secret the kernel pay service presents on POST /api/webhook/payment (Authorization: Bearer …). Unset -> the webhook answers 500 and tips never complete. |
 
-## First boot only
+## Claiming a fresh deployment
 
-Set once, then delete. This is how the operator's claim code is spent (see [Identity](../README.md#identity)).
-
-| Variable | When | Dev | Prod | What it does |
-|---|---|---|---|---|
-| `IMAJIN_APP_CLAIM_CODE` **(secret)** | runtime | (only on first boot) | (only on first boot) | One-time code from the kernel operator's /jin approval card. Needed only on the very first boot (no keystore yet) or a lost-keystore rebind; delete it after the first successful boot. |
+No claim code belongs in env. Without a keystore, the app boots unclaimed and points the operator to
+`/coffee/claim`. Approve provisioning on `/jin`, paste its one-time code in that browser page, and the app
+goes live without an env edit or restart. Every later boot uses the persisted keystore alone
+(see [Identity](../README.md#identity)).
 
 ## Optional
 
@@ -165,16 +164,14 @@ AUTH_SERVICE_URL=https://dev-jin.imajin.ai/auth
 REGISTRY_SERVICE_URL=https://dev-jin.imajin.ai/registry
 PAY_SERVICE_URL=https://dev-jin.imajin.ai/pay
 
-# Shared secrets (never commit real values): openssl rand -hex 32 for SESSION_SECRET;
+# Shared secrets (never commit real values): provision through the approved secret tools;
 # WEBHOOK_SECRET must equal the dev pay service's webhook secret.
 SESSION_SECRET=REPLACE_ME
 WEBHOOK_SECRET=REPLACE_ME
 
 # --- Identity (operator step: README "Identity", docs/REGISTRATION.md) ---
 IMAJIN_APP_DID=did:imajin:REPLACE_ME
-# First boot only — the one-time claim code from the /jin approval card.
-# Delete it after the app has booted once.
-# IMAJIN_APP_CLAIM_CODE=
+# Claim only in the browser: approve on /jin, then open /coffee/claim.
 # Persistent, per-environment keystore (must survive deploys):
 IMAJIN_APP_KEYSTORE=/home/jin/.imajin/coffee.dev.keystore.json
 
@@ -211,16 +208,14 @@ AUTH_SERVICE_URL=https://jin.imajin.ai/auth
 REGISTRY_SERVICE_URL=https://jin.imajin.ai/registry
 PAY_SERVICE_URL=https://jin.imajin.ai/pay
 
-# Shared secrets (never commit real values): openssl rand -hex 32 for SESSION_SECRET;
+# Shared secrets (never commit real values): provision through the approved secret tools;
 # WEBHOOK_SECRET must equal the prod pay service's webhook secret.
 SESSION_SECRET=REPLACE_ME
 WEBHOOK_SECRET=REPLACE_ME
 
 # --- Identity (operator step: README "Identity", docs/REGISTRATION.md) ---
 IMAJIN_APP_DID=did:imajin:REPLACE_ME
-# First boot only — the one-time claim code from the /jin approval card.
-# Delete it after the app has booted once.
-# IMAJIN_APP_CLAIM_CODE=
+# Claim only in the browser: approve on /jin, then open /coffee/claim.
 # Persistent, per-environment keystore (must survive deploys):
 IMAJIN_APP_KEYSTORE=/home/jin/.imajin/coffee.prod.keystore.json
 
