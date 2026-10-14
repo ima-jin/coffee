@@ -40,6 +40,9 @@ function main(argv) {
   if (env.IMAJIN_APP_CLAIM_CODE?.trim()) {
     warnings.push('IMAJIN_APP_CLAIM_CODE is ignored — claim at /coffee/claim and delete IMAJIN_APP_CLAIM_CODE from the env file.');
   }
+  if (env.SESSION_SECRET?.trim()) {
+    warnings.push('SESSION_SECRET is ignored; it is issued by the kernel vault. Delete it from the env file.');
+  }
   for (const warning of warnings) console.warn(`warn:  ${warning}`);
   for (const error of errors) console.error(`error: ${error}`);
   if (errors.length > 0) {

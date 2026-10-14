@@ -14,6 +14,23 @@ coffee is deployed from **this repo**, as its own pm2 process behind the kernel 
 The pm2 names, ports, and Caddy route are the ones the kernel monorepo already used for coffee, so nothing
 upstream of the app changes.
 
+## Vault-backed session upgrade prerequisite
+
+**Before upgrading this app, in each environment independently:** deploy a kernel that issues
+sealed app secrets ([ima-jin/imajin-ai#2801](https://github.com/ima-jin/imajin-ai/pull/2801)),
+then **Sync manifest secrets** for that environment's coffee app on `/jin`, review and sign
+the proposal. Otherwise a claimed app fails closed at boot (`SESSION_SECRET unavailable`) and
+exits with code 1. A published SDK alone does not mean the target kernel can issue these secrets.
+
+- **Dev:** the dev kernel cannot issue sealed app secrets yet at this adoption step. Keep
+  `dev-coffee` on the previous version until the dev kernel supports #2801 and its coffee manifest
+  secrets have been synced and signed on the dev `/jin`.
+- **Prod:** separately verify the prod kernel supports #2801, then sync and sign the prod coffee
+  manifest secrets on the prod `/jin` before upgrading `prod-coffee`. Dev sync does not provision prod.
+
+Use the approved kernel/app deployment tools for this ordering; never generate, copy or put a
+session credential in env to bypass the prerequisite.
+
 ## The one command
 
 From the target's checkout on the server:
