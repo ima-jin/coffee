@@ -33,6 +33,7 @@ describe('vault-backed boot and sessions', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
+    vi.spyOn(process, 'exit').mockImplementation(() => { throw new SelfSecretsUnavailableError(); });
     resetSigningIdentityForTests();
     vi.resetModules();
     dir = await mkdtemp(join(tmpdir(), 'coffee-vault-test-'));
@@ -144,8 +145,9 @@ describe('vault-backed boot and sessions', () => {
       expect(safeError.message).not.toContain('\n');
       expect(safeError.message).not.toContain('FAKE_');
       expect(safeError.cause).toBeUndefined();
-      // Next reports the thrown boot error once; the loader never logs a duplicate.
-      expect(log).not.toHaveBeenCalled();
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(log).toHaveBeenCalledWith(safeError.message);
+      expect(process.exit).toHaveBeenCalledWith(1);
       expect(isAppClaimed()).toBe(false);
       expect(() => sessionSecret()).toThrow(SelfSecretsUnavailableError);
     }
@@ -166,7 +168,9 @@ describe('vault-backed boot and sessions', () => {
     });
     expect(loadFromVault).not.toHaveBeenCalled();
     expect(isAppClaimed()).toBe(false);
-    expect(log).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith(new SelfSecretsUnavailableError().message);
+    expect(process.exit).toHaveBeenCalledWith(1);
   });
 
   it('shares memory across separately loaded instrumentation and route modules', async () => {

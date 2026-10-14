@@ -26,8 +26,8 @@ export class SelfSecretsUnavailableError extends Error {
 
 /**
  * Called only after signing bootstrap/claim establishes this app's keystore.
- * No provider error/cause is retained: the boot framework reports this single
- * value-free diagnostic, without a duplicate app log or an untrusted response.
+ * No provider error/cause is retained: instrumentation logs this single
+ * value-free diagnostic and exits, without a duplicate log or untrusted response.
  */
 export async function loadSelfSecrets(appDid: string): Promise<void> {
   const store = globalThis as SelfSecretsStore;
