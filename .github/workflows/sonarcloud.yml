@@ -89,9 +89,6 @@ jobs:
     if: github.event_name == 'push' && needs.analysis-mode.outputs.automatic == 'false'
     name: SonarCloud
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
@@ -172,10 +169,6 @@ jobs:
       needs.analysis-mode.outputs.automatic == 'false'
     name: SonarCloud
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-      actions: read # to download the sonar-payload artifact from the triggering CI run
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
