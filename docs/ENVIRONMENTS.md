@@ -6,7 +6,7 @@ scripts — with what it does, when it is read, and its dev and prod values. Thi
 starts reading a variable that is not documented here.
 
 No secret values live in this repo. Examples are shape-only placeholders; real values live in the untracked
-`.env.local` on each host.
+vault; env holds only the keystore path, database connection and non-secret configuration.
 
 ## The three env files
 
@@ -37,7 +37,7 @@ handles it. Variables marked *runtime* are read when the process starts or per r
 - **Database.** Separate Postgres database per environment; the schema name is `coffee` in both.
 - **Keystore.** Separate `IMAJIN_APP_KEYSTORE` file per environment; each environment has its own app DID.
 - **Port.** dev 3100, prod 7100 (from `ecosystem.config.cjs`, not the env file).
-- **Session.** `SESSION_SECRET` is distinct per environment and provisioned through the approved secret tool.
+- **Session.** The registered manifest declares a per-app session recipe. The kernel issues and seals it; boot loads it into memory via the app keystore identity, never env.
 - **Callbacks.** The kernel signs; the app verifies public keys. No shared callback credential is provisioned.
 
 ## Required on every deployed instance
@@ -60,7 +60,6 @@ Missing any of these and `scripts/check-env.mjs` fails the deploy before anythin
 | `NEXT_PUBLIC_APP_URL` | runtime | `https://dev-jin.imajin.ai` | `https://jin.imajin.ai` | This app's public origin (no base path). The origin of Stripe success/cancel redirects and OpenGraph URLs. It is NOT the token audience: scoped app tokens are verified against the registry slug (see IMAJIN_APP_AUD). |
 | `IMAJIN_APP_DID` | runtime | `did:imajin:<dev app DID>` | `did:imajin:<prod app DID>` | This app's own did:imajin:… from registration (docs/REGISTRATION.md). instrumentation.ts refuses to boot without it. Not a secret. |
 | `NEXT_PUBLIC_IMAJIN_APP_ID` | build | `app_<dev registry id>` | `app_<prod registry id>` | This app's public registry id (`app_…`) from registration. Used client-side to build the sign-in redirect — safe to expose. Baked at build time. |
-| `SESSION_SECRET` **(secret)** | runtime | (approved secret tool) | (approved secret tool) | Secret used to sign this app's HS256 session cookie. Provision through the approved secret tool; distinct for dev and prod; never hand-generate or commit. |
 
 ## Claiming a fresh deployment
 
@@ -71,8 +70,25 @@ the SDK's public pins and single-worker replay protection as described in
 
 No claim code belongs in env. Without a keystore, the app boots unclaimed and points the operator to
 `/coffee/claim`. Approve provisioning on `/jin`, paste its one-time code in that browser page, and the app
-goes live without an env edit or restart. Every later boot uses the persisted keystore alone
+goes live without an env edit or restart. Every later boot uses the persisted keystore to load the signing identity and declared self-secrets
 (see [Identity](../README.md#identity)).
+
+## Vault-backed sessions
+
+`imajin.app.json` declares names and generation recipes only. Provision and claim issue and seal them
+inside the kernel vault. For an already-claimed app, select **Sync manifest secrets** on `/jin`, review
+and sign the proposal. Restart through the approved tool. No secret is generated, revealed, copied or
+entered in a shell or env file. Boot uses the published app-keystore `loadFromVault` helper and holds
+values in process memory only. A stale session credential in env is ignored.
+
+If the vault cannot be reached or a required declaration is missing, claimed boot fails closed with
+a single value-free error naming the declaration and the `/jin` re-sync step. Signing cannot begin
+before loading resolves. Without a keystore, the existing restricted unclaimed mode still works;
+claim only becomes usable after self-secrets load. If loading fails after claim, re-sync and restart.
+
+To rotate, select **Rotate** on the app secret card in `/jin`, review and sign the operator proposal,
+then restart through the approved tool. No file edit is needed; the new generation is fetched on
+restart, and existing signed-in sessions are invalidated (users sign in again).
 
 ## Optional
 
@@ -169,9 +185,8 @@ AUTH_SERVICE_URL=https://dev-jin.imajin.ai/auth
 REGISTRY_SERVICE_URL=https://dev-jin.imajin.ai/registry
 PAY_SERVICE_URL=https://dev-jin.imajin.ai/pay
 
-# Session credential: provision through the approved secret tool; never commit real values.
+# Session credentials are issued/sealed by the kernel and loaded from the vault at boot.
 # Kernel callbacks are signed and verified with public keys, not a shared credential.
-SESSION_SECRET=REPLACE_ME
 
 # --- Identity (operator step: README "Identity", docs/REGISTRATION.md) ---
 IMAJIN_APP_DID=did:imajin:REPLACE_ME
@@ -212,9 +227,8 @@ AUTH_SERVICE_URL=https://jin.imajin.ai/auth
 REGISTRY_SERVICE_URL=https://jin.imajin.ai/registry
 PAY_SERVICE_URL=https://jin.imajin.ai/pay
 
-# Session credential: provision through the approved secret tool; never commit real values.
+# Session credentials are issued/sealed by the kernel and loaded from the vault at boot.
 # Kernel callbacks are signed and verified with public keys, not a shared credential.
-SESSION_SECRET=REPLACE_ME
 
 # --- Identity (operator step: README "Identity", docs/REGISTRATION.md) ---
 IMAJIN_APP_DID=did:imajin:REPLACE_ME

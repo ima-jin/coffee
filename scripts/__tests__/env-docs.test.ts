@@ -43,7 +43,22 @@ describe('env contract coverage', () => {
     expect(dependencies['@ima-jin/auth-client']).toBe('0.8.18');
   });
 
+  it('removes the session credential from all env contracts and operator docs', () => {
+    for (const file of [
+      '.env.example', '.env.dev.example', '.env.prod.example',
+      'scripts/lib/env-vars.json', 'scripts/lib/env-manifest.mjs', 'scripts/check-env.mjs',
+      'README.md', 'AGENTS.md',
+      ...readdirSync(join(ROOT, 'docs')).filter((file) => file.endsWith('.md')).map((file) => `docs/${file}`),
+    ]) {
+      expect(read(file), file).not.toContain('SESSION_SECRET');
+    }
+    expect(JSON.parse(read('imajin.app.json')).secrets).toEqual([
+      { name: 'SESSION_SECRET', kind: 'random-32B' },
+    ]);
+  });
+
   it('has no duplicate manifest entries and every entry is complete', () => {
+    expect(manifest.has('SESSION_SECRET')).toBe(false);
     expect(new Set(ENV_VAR_NAMES).size).toBe(ENV_VAR_NAMES.length);
     for (const variable of ENV_VARS) {
       expect(variable.summary.length, variable.name).toBeGreaterThan(10);
@@ -140,10 +155,9 @@ describe('validateEnv', () => {
   const FILLED = {
     IMAJIN_APP_DID: 'did:imajin:abc123',
     NEXT_PUBLIC_IMAJIN_APP_ID: 'app_abc123',
-    SESSION_SECRET: 'session-secret-value',
     DATABASE_URL: 'postgres://coffee:pw@localhost:5432/db',
   };
-  const PLACEHOLDER_VARS = ['DATABASE_URL', 'IMAJIN_APP_DID', 'NEXT_PUBLIC_IMAJIN_APP_ID', 'SESSION_SECRET'];
+  const PLACEHOLDER_VARS = ['DATABASE_URL', 'IMAJIN_APP_DID', 'NEXT_PUBLIC_IMAJIN_APP_ID'];
 
   it.each([
     ['dev', '.env.dev.example'],
@@ -233,8 +247,7 @@ describe('check-env CLI', () => {
       ...parseEnv(read(example)),
       IMAJIN_APP_DID: 'did:imajin:abc123',
       NEXT_PUBLIC_IMAJIN_APP_ID: 'app_abc123',
-      SESSION_SECRET: 'session-secret-value',
-      IMAJIN_APP_CLAIM_CODE: 'FAKE_ENV_CLAIM_CODE',
+        IMAJIN_APP_CLAIM_CODE: 'FAKE_ENV_CLAIM_CODE',
       DATABASE_URL: 'postgres://coffee:pw@localhost:5432/db',
     });
     writeFileSync(file, filled.map(([name, value]) => `${name}=${value}`).join('\n'));

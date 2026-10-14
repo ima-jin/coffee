@@ -113,15 +113,6 @@
     "prod": "app_<prod registry id>"
   },
   {
-    "name": "SESSION_SECRET",
-    "status": "required",
-    "phase": "runtime",
-    "secret": true,
-    "summary": "Secret used to sign this app's HS256 session cookie. Provision through the approved secret tool; distinct for dev and prod; never hand-generate or commit.",
-    "dev": "(approved secret tool)",
-    "prod": "(approved secret tool)"
-  },
-  {
     "name": "PLATFORM_DID",
     "status": "optional",
     "phase": "runtime",

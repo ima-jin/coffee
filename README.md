@@ -33,7 +33,7 @@ The kernel verifies both and returns `{ appDid, userDid, scopes }` — that trip
 2. **Register this app with the kernel** — see [`docs/REGISTRATION.md`](./docs/REGISTRATION.md).
    You'll get back this app's `appDid` and registry `id`.
 3. **Set env**: `cp .env.example .env.local`, then fill in `IMAJIN_APP_DID`,
-   `NEXT_PUBLIC_IMAJIN_APP_ID`, `SESSION_SECRET`, `APP_DB_SCHEMA`, `DATABASE_URL`, and
+   `NEXT_PUBLIC_IMAJIN_APP_ID`, `APP_DB_SCHEMA`, `DATABASE_URL`, and
    `IMAJIN_KERNEL_URL`. This app refuses to start without `IMAJIN_APP_DID` set, or if a raw
    `IMAJIN_APP_PRIVATE_KEY` is present (see `instrumentation.ts`) — it fetches its own signing key
    at boot via `@ima-jin/auth-client`'s `loadAppSigningKey()` instead. The only claim path is
@@ -72,6 +72,13 @@ the kernel's claim flow. Nothing is hand-made, and no key material ever lands in
      restart. `/claim` then 404s — the code is single-use. Failed attempts are rate-limited per client.
 4. **Keep the keystore.** Every later boot
    re-authenticates with the keystore alone, so ordinary restarts need no operator action.
+
+Session credentials are declared as names/recipes in `imajin.app.json`, issued and sealed by the
+kernel on provision/claim, and loaded through the app keystore with `loadFromVault` into process
+memory before sessions are enabled. They never belong in env. For already-claimed apps, use
+**Sync manifest secrets** on `/jin`, review and sign the proposal, then restart through the approved
+tool. For rotation, use **Rotate** on `/jin`, sign and restart (existing sessions are invalidated).
+See [Vault-backed sessions](./docs/ENVIRONMENTS.md#vault-backed-sessions).
 
 ## Deploy
 

@@ -66,7 +66,6 @@ cp .env.example .env.local
 # fill in:
 #   IMAJIN_APP_DID=<appDid from the response above>
 #   NEXT_PUBLIC_IMAJIN_APP_ID=<id from the response above>
-#   SESSION_SECRET=<provision through the approved secret tool; never hand-generate>
 #   APP_DB_SCHEMA=<a name for this app's own Postgres schema — see docs/MIGRATIONS.md>
 #   DATABASE_URL=<this app's own Postgres connection string>
 #   IMAJIN_KERNEL_URL=<same host as IMAJIN_AUTH_URL above>
@@ -93,7 +92,7 @@ signing key from the kernel, via `@ima-jin/auth-client`'s `loadAppSigningKey()`
 That's it — no ssh, no env file edit, no restart. Behind the scenes, this app's own
 `app/api/claim/route.ts` calls the kernel's `POST /api/apps/claim` on your behalf, writes the
 local bootstrap keystore (`IMAJIN_APP_KEYSTORE`, default `./.imajin/keystore.json`, mode `0600`),
-and hot-swaps the in-memory signing identity immediately — the app is claimed without a restart
+loads declared self-secrets through the same keystore identity and then hot-swaps the in-memory signing identity — the app is claimed without a restart
 (though a restart also works fine afterwards). `/claim` 404s once this succeeds; the code is spent
 and cannot be reused.
 
@@ -123,7 +122,9 @@ Without a usable `X-Forwarded-For`, all callers share one coarse fallback bucket
 
 Once a keystore exists, every later boot signs a fresh challenge with the
 persisted bootstrap key and fetches the signing key again — no claim code needed, no operator
-action required for an ordinary restart.
+action required for an ordinary restart. Declared session credentials are then fetched from the vault
+into memory before signing is enabled. See [Vault-backed sessions](./ENVIRONMENTS.md#vault-backed-sessions)
+for signed `/jin` re-sync and rotation tool steps; no session credential belongs in env.
 
 If the local keystore is ever lost (disk wipe, redeploy to a fresh host), ask the kernel operator
 to re-approve `apps.provision` with `reissueClaim: true` for a fresh claim code — redeeming it also
