@@ -95,7 +95,7 @@ describe('env contract coverage', () => {
     expect(manifest.has('IMAJIN_APP_CLAIM_CODE')).toBe(false);
     const files = [
       '.env.example', '.env.dev.example', '.env.prod.example', 'README.md', 'AGENTS.md',
-      'instrumentation.ts', 'middleware.ts', 'scripts/check-env.mjs',
+      'instrumentation.ts', 'middleware.ts', 'scripts/check-env.mjs', 'scripts/deploy.sh',
       'scripts/lib/env-manifest.mjs', 'scripts/lib/env-vars.json',
       ...walk(join(ROOT, 'app')), ...walk(join(ROOT, 'src')),
       ...readdirSync(join(ROOT, 'docs')).filter((file) => file.endsWith('.md')).map((file) => `docs/${file}`),
