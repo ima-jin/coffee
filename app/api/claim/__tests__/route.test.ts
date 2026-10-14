@@ -9,6 +9,11 @@ import { middleware } from '../../../../middleware';
 import { NextRequest } from 'next/server';
 import { GET as health } from '../../health/route';
 import { POST } from '../route';
+import { loadFromVault } from '@ima-jin/auth-client';
+vi.mock('@ima-jin/auth-client', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@ima-jin/auth-client')>(),
+  loadFromVault: vi.fn(),
+}));
 vi.mock('@/lib/migration-status', () => ({
   checkAppMigrations: async () => ({ migrationHead: 'test', appliedCount: 1, pendingCount: 0 }),
   hasPendingMigrations: () => false,
@@ -38,6 +43,9 @@ describe('POST /api/claim', () => {
   let workDir: string;
 
   beforeEach(async () => {
+    vi.mocked(loadFromVault).mockReset().mockResolvedValue({
+      values: { SESSION_SECRET: 'FAKE_TEST_SESSION_ONLY' }, degraded: [],
+    });
     workDir = await mkdtemp(join(tmpdir(), 'imajin-claim-route-'));
     vi.stubEnv('IMAJIN_KERNEL_URL', KERNEL_URL);
     vi.stubEnv('IMAJIN_APP_KEYSTORE', join(workDir, 'keystore.json'));
@@ -82,6 +90,28 @@ describe('POST /api/claim', () => {
     expect(middleware(request).headers.get('x-middleware-next')).toBe('1');
     expect(middleware(new NextRequest('http://localhost:3000/claim')).status).toBe(404);
     expect(log).not.toHaveBeenCalled();
+  });
+
+  it('fails closed after claim when vault loading fails, logging one names-only re-sync line', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockKernelClaim({
+      appDid: 'did:imajin:app-under-test',
+      privateKey: 'FAKE_SIGNING_KEY',
+      publicKey: 'FAKE_PUBLIC_KEY',
+    });
+    vi.mocked(loadFromVault).mockRejectedValue(new Error('FAKE_PROVIDER_SENSITIVE_TEXT'));
+
+    const response = await POST(postRequest({ claimCode: 'FAKE_BROWSER_CLAIM_CODE' }) as never);
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(isAppClaimed()).toBe(false);
+    expect(body.error).toContain('SESSION_SECRET');
+    expect(body.error).toContain('/jin');
+    expect(body.error).toContain('Sync manifest secrets');
+    expect(body.error).not.toContain('FAKE_');
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith(body.error);
   });
 
   it('rejects a missing claim code without calling the kernel', async () => {

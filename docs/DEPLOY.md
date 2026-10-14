@@ -14,6 +14,23 @@ coffee is deployed from **this repo**, as its own pm2 process behind the kernel 
 The pm2 names, ports, and Caddy route are the ones the kernel monorepo already used for coffee, so nothing
 upstream of the app changes.
 
+## Vault-backed session upgrade prerequisite
+
+**Before upgrading this app, in each environment independently:** deploy a kernel that issues
+sealed app secrets ([ima-jin/imajin-ai#2801](https://github.com/ima-jin/imajin-ai/pull/2801)),
+then **Sync manifest secrets** for that environment's coffee app on `/jin`, review and sign
+the proposal. Otherwise a claimed app fails closed at boot (`SESSION_SECRET unavailable`) and
+exits with code 1. A published SDK alone does not mean the target kernel can issue these secrets.
+
+- **Dev:** the dev kernel cannot issue sealed app secrets yet at this adoption step. Keep
+  `dev-coffee` on the previous version until the dev kernel supports #2801 and its coffee manifest
+  secrets have been synced and signed on the dev `/jin`.
+- **Prod:** separately verify the prod kernel supports #2801, then sync and sign the prod coffee
+  manifest secrets on the prod `/jin` before upgrading `prod-coffee`. Dev sync does not provision prod.
+
+Use the approved kernel/app deployment tools for this ordering; never generate, copy or put a
+session credential in env to bypass the prerequisite.
+
 ## The one command
 
 From the target's checkout on the server:
@@ -61,7 +78,7 @@ these commands on the server.
 
 ### Operator steps this repo cannot do
 
-Dev and prod are separate identities: each has its own app DID, claim code, keystore and `SESSION_SECRET`.
+Dev and prod are separate identities: each has its own app DID, claim code, keystore and vault-issued session credential.
 
 1. **Mint the app identity** through the kernel's claim flow — see [Identity](../README.md#identity). In short:
    register the app, set the non-secret `IMAJIN_APP_DID`, and deploy. It boots unclaimed if no keystore
@@ -71,9 +88,13 @@ Dev and prod are separate identities: each has its own app DID, claim code, keys
    placeholder. No key material is ever written to the repo, the env file, or the logs.
 2. **Create the databases/roles** and put the connection strings in each `.env.local`. Prod/dev already contain
    the `coffee` schema with real tips data; the baseline adopts it in place.
-3. **Provision the session credential through the approved secret tool** — `SESSION_SECRET`.
-   Never hand-generate or copy values in a shell. Its vault migration is separate kernel work;
-   if the required tool is unavailable, stop rather than working around it.
+3. **Sync the registered manifest through `/jin`** for already-claimed apps: select **Sync manifest secrets**,
+   review and sign the proposal. Fresh provision/claim issues and seals declarations automatically.
+   Restart through the approved tool; the app loads session credentials from the vault into memory
+   with its own keystore identity. No secret env entry or file edit is required. For rotation, select
+   **Rotate** on `/jin`, review and sign, then restart; existing sessions are invalidated.
+   Unreachable vault or missing declarations fail closed: follow the names-only boot error to re-sync,
+   then restart. If the required tool is unavailable, stop rather than working around it.
    The kernel signs payment callbacks; coffee verifies public keys. No shared callback credential is needed.
    Settlement needs no key in the env: coffee settles with its own app-service token. The operator must **approve the
    `pay:settle` service scope for this app's DID** (propose it via `POST /api/apps/service-scopes`, countersign on the

@@ -65,4 +65,14 @@ describe('register', () => {
 
     expect(bootstrapSigningIdentityMock).toHaveBeenCalledTimes(1);
   });
+
+  it('propagates non-vault bootstrap failures without adding a duplicate log', async () => {
+    vi.stubEnv('NEXT_RUNTIME', 'nodejs');
+    vi.stubEnv('IMAJIN_APP_PRIVATE_KEY', '');
+    vi.stubEnv('IMAJIN_APP_DID', 'did:imajin:app-under-test');
+    const error = new Error('FAKE_NON_VAULT_ERROR');
+    bootstrapSigningIdentityMock.mockRejectedValue(error);
+    const { register } = await import('../instrumentation');
+    await expect(register()).rejects.toBe(error);
+  });
 });

@@ -43,7 +43,35 @@ describe('env contract coverage', () => {
     expect(dependencies['@ima-jin/auth-client']).toBe('0.8.18');
   });
 
+  it('puts the per-environment sealed-secret prerequisite before the deploy commands', () => {
+    const docs = read('docs/DEPLOY.md');
+    expect(docs.indexOf('## Vault-backed session upgrade prerequisite')).toBeLessThan(docs.indexOf('## The one command'));
+    expect(docs).toContain('ima-jin/imajin-ai#2801');
+    expect(docs).toContain('**Sync manifest secrets**');
+    expect(docs).toContain('SESSION_SECRET unavailable');
+    expect(docs).toContain('exits with code 1');
+    expect(docs).toContain('dev kernel cannot issue sealed app secrets yet');
+    expect(docs).toContain('before upgrading `prod-coffee`');
+    expect(docs).toContain('Dev sync does not provision prod');
+  });
+
+  it('removes the session credential from all env contracts and operator docs', () => {
+    for (const file of [
+      '.env.example', '.env.dev.example', '.env.prod.example',
+      // check-env and DEPLOY retain names-only cleanup/recovery diagnostics, not env configuration.
+      'scripts/lib/env-vars.json', 'scripts/lib/env-manifest.mjs',
+      'README.md', 'AGENTS.md',
+      ...readdirSync(join(ROOT, 'docs')).filter((file) => file.endsWith('.md') && file !== 'DEPLOY.md').map((file) => `docs/${file}`),
+    ]) {
+      expect(read(file), file).not.toContain('SESSION_SECRET');
+    }
+    expect(JSON.parse(read('imajin.app.json')).secrets).toEqual([
+      { name: 'SESSION_SECRET', kind: 'random-32B' },
+    ]);
+  });
+
   it('has no duplicate manifest entries and every entry is complete', () => {
+    expect(manifest.has('SESSION_SECRET')).toBe(false);
     expect(new Set(ENV_VAR_NAMES).size).toBe(ENV_VAR_NAMES.length);
     for (const variable of ENV_VARS) {
       expect(variable.summary.length, variable.name).toBeGreaterThan(10);
@@ -140,10 +168,9 @@ describe('validateEnv', () => {
   const FILLED = {
     IMAJIN_APP_DID: 'did:imajin:abc123',
     NEXT_PUBLIC_IMAJIN_APP_ID: 'app_abc123',
-    SESSION_SECRET: 'session-secret-value',
     DATABASE_URL: 'postgres://coffee:pw@localhost:5432/db',
   };
-  const PLACEHOLDER_VARS = ['DATABASE_URL', 'IMAJIN_APP_DID', 'NEXT_PUBLIC_IMAJIN_APP_ID', 'SESSION_SECRET'];
+  const PLACEHOLDER_VARS = ['DATABASE_URL', 'IMAJIN_APP_DID', 'NEXT_PUBLIC_IMAJIN_APP_ID'];
 
   it.each([
     ['dev', '.env.dev.example'],
@@ -233,7 +260,6 @@ describe('check-env CLI', () => {
       ...parseEnv(read(example)),
       IMAJIN_APP_DID: 'did:imajin:abc123',
       NEXT_PUBLIC_IMAJIN_APP_ID: 'app_abc123',
-      SESSION_SECRET: 'session-secret-value',
       IMAJIN_APP_CLAIM_CODE: 'FAKE_ENV_CLAIM_CODE',
       DATABASE_URL: 'postgres://coffee:pw@localhost:5432/db',
     });
@@ -245,6 +271,29 @@ describe('check-env CLI', () => {
       'warn:  IMAJIN_APP_CLAIM_CODE is ignored — claim at /coffee/claim and delete IMAJIN_APP_CLAIM_CODE from the env file.\n',
     );
     expect(result.stdout + result.stderr).not.toContain('FAKE_ENV_CLAIM_CODE');
+  });
+  it.each([
+    ['dev', '.env.dev.example'],
+    ['prod', '.env.prod.example'],
+  ] as const)('warns once about an ignored stale session credential on %s without leaking the value', (target, example) => {
+    const file = join(dir, 'stale-session.env');
+    const filled = {
+      ...parseEnv(read(example)),
+      IMAJIN_APP_DID: 'did:imajin:abc123',
+      NEXT_PUBLIC_IMAJIN_APP_ID: 'app_abc123',
+      DATABASE_URL: 'postgres://localhost:5432/db',
+    };
+    for (const value of ['FAKE_STALE_SESSION_VALUE', '', '   ']) {
+      writeFileSync(file, [...Object.entries(filled).map(([name, entry]) => `${name}=${entry}`), `SESSION_SECRET="${value}"`].join('\n'));
+      const result = cli([target, '--file', file]);
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe(`${file} is valid for ${target}.\n`);
+      const warning = value.trim()
+        ? 'warn:  SESSION_SECRET is ignored; it is issued by the kernel vault. Delete it from the env file.\n'
+        : '';
+      expect(result.stderr).toBe(warning);
+      expect(result.stdout + result.stderr).not.toContain('FAKE_STALE_SESSION_VALUE');
+    }
   });
 
   it('exits 1 for an invalid file without echoing any value', () => {
