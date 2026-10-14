@@ -36,11 +36,6 @@ export function kernelUrl(): string {
   return stripTrailingSlashes(required('IMAJIN_KERNEL_URL'));
 }
 
-/** Shared secret the pay service presents on `POST /api/webhook/payment`. */
-export function webhookSecret(): string | undefined {
-  return process.env.WEBHOOK_SECRET || undefined;
-}
-
 /**
  * Absolute public URL of this app (origin + optional basePath), used for
  * Stripe success/cancel redirects and OpenGraph URLs.

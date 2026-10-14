@@ -34,10 +34,11 @@ components:
         Scoped app token (preferred). Mint it from the signed-in user's kernel session with
         POST {kernel}/auth/api/tokens/app, using this app's host as `aud`. Tokens minted for
         any other host are rejected. No coffee-specific scopes are required.
-    webhookSecret:
-      type: http
-      scheme: bearer
-      description: "Bearer WEBHOOK_SECRET — internal payment callback from pay service"
+    kernelSignature:
+      type: apiKey
+      in: header
+      name: x-kernel-signature
+      description: "Ed25519 kernel signature binding audience, timestamp, nonce, method, path/query and exact body bytes; all five x-kernel-* headers below are required."
   schemas:
     CoffeePage:
       type: object
@@ -619,9 +620,37 @@ paths:
         `rail: stripe-byo`: that callback is the settlement, so coffee completes the tip and marks it
         settled WITHOUT calling `/pay/api/settle` (the kernel refuses such a payment). A callback with
         no `rail` settles through `/pay/api/settle` as before.
+        The kernel signs; coffee verifies with the published SDK before parsing or business side effects.
+        The audience must equal this deployment's IMAJIN_APP_DID, timestamps must be within
+        300 seconds, and each nonce is accepted only once. Retries must be freshly signed.
       tags: [coffee]
       security:
-        - webhookSecret: []
+        - kernelSignature: []
+      parameters:
+        - name: x-kernel-audience
+          in: header
+          required: true
+          schema: { type: string }
+          description: "Recipient app DID, not the app-token slug."
+        - name: x-kernel-timestamp
+          in: header
+          required: true
+          schema: { type: string, pattern: "^[0-9]+$" }
+          description: "Unix timestamp in seconds."
+        - name: x-kernel-nonce
+          in: header
+          required: true
+          schema: { type: string, format: uuid }
+        - name: x-kernel-kid
+          in: header
+          required: true
+          schema: { type: string }
+          description: "Active kernel signing-key identifier from trusted public discovery."
+        - name: x-kernel-signature
+          in: header
+          required: true
+          schema: { type: string, pattern: "^[0-9a-fA-F]{128}$" }
+          description: "Hex-encoded Ed25519 signature over the SDK v1 canonical payload."
       requestBody:
         required: true
         content:
@@ -655,12 +684,22 @@ paths:
                 properties:
                   received: { type: boolean }
         "401":
-          description: Invalid or missing webhook secret
+          description: Missing, invalid, tampered, wrong-audience, stale, future or replayed signature
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "500":
-          description: Webhook not configured (WEBHOOK_SECRET unset) or handler failed
+          description: Handler failed after successful verification
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "400":
+          description: Correctly signed body is not valid JSON
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: Verification unavailable (public discovery, trust or storage failure); no business side effects
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

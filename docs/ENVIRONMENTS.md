@@ -37,7 +37,8 @@ handles it. Variables marked *runtime* are read when the process starts or per r
 - **Database.** Separate Postgres database per environment; the schema name is `coffee` in both.
 - **Keystore.** Separate `IMAJIN_APP_KEYSTORE` file per environment; each environment has its own app DID.
 - **Port.** dev 3100, prod 7100 (from `ecosystem.config.cjs`, not the env file).
-- **Secrets.** `SESSION_SECRET` is distinct per environment; `WEBHOOK_SECRET` must equal the matching pay service's.
+- **Session.** `SESSION_SECRET` is distinct per environment and provisioned through the approved secret tool.
+- **Callbacks.** The kernel signs; the app verifies public keys. No shared callback credential is provisioned.
 
 ## Required on every deployed instance
 
@@ -49,7 +50,7 @@ Missing any of these and `scripts/check-env.mjs` fails the deploy before anythin
 | `APP_DB_SCHEMA` | runtime | `coffee` | `coffee` | The one Postgres schema this app owns. Fixed to `coffee` — the existing prod/dev schema; never change it. |
 | `IMAJIN_AUTH_URL` | runtime | `https://dev-jin.imajin.ai` | `https://jin.imajin.ai` | Kernel base URL (no path) used by @ima-jin/auth-client for session validation and the sign-in flow. |
 | `NEXT_PUBLIC_IMAJIN_AUTH_URL` | build | `https://dev-jin.imajin.ai` | `https://jin.imajin.ai` | Same value as IMAJIN_AUTH_URL, exposed to the browser for the "Sign in with Imajin" redirect. Baked at build time; rebuild after changing. |
-| `AUTH_SERVICE_URL` | runtime | `https://dev-jin.imajin.ai/auth` | `https://jin.imajin.ai/auth` | Kernel auth service base URL, including the /auth prefix. Read by @ima-jin/auth to verify scoped app tokens and sessions. |
+| `AUTH_SERVICE_URL` | runtime | `https://dev-jin.imajin.ai/auth` | `https://jin.imajin.ai/auth` | Kernel auth service base URL, including the /auth prefix. Read by @ima-jin/auth to verify scoped app tokens, sessions and kernel-signed webhooks through public signing-key discovery. |
 | `REGISTRY_SERVICE_URL` | runtime | `https://dev-jin.imajin.ai/registry` | `https://jin.imajin.ai/registry` | Kernel registry service base URL, including the /registry prefix. Public node config for .fair manifests. |
 | `PAY_SERVICE_URL` | runtime | `https://dev-jin.imajin.ai/pay` | `https://jin.imajin.ai/pay` | Kernel pay service base URL, including the /pay prefix. Target of Stripe Checkout creation and tip settlement. |
 | `NEXT_PUBLIC_PAY_URL` | build | `https://dev-jin.imajin.ai/pay` | `https://jin.imajin.ai/pay` | Browser-visible base URL of the same pay service (Stripe Connect payout banner on /dashboard). Baked at build time; rebuild after changing. |
@@ -60,9 +61,13 @@ Missing any of these and `scripts/check-env.mjs` fails the deploy before anythin
 | `IMAJIN_APP_DID` | runtime | `did:imajin:<dev app DID>` | `did:imajin:<prod app DID>` | This app's own did:imajin:… from registration (docs/REGISTRATION.md). instrumentation.ts refuses to boot without it. Not a secret. |
 | `NEXT_PUBLIC_IMAJIN_APP_ID` | build | `app_<dev registry id>` | `app_<prod registry id>` | This app's public registry id (`app_…`) from registration. Used client-side to build the sign-in redirect — safe to expose. Baked at build time. |
 | `SESSION_SECRET` **(secret)** | runtime | (approved secret tool) | (approved secret tool) | Secret used to sign this app's HS256 session cookie. Provision through the approved secret tool; distinct for dev and prod; never hand-generate or commit. |
-| `WEBHOOK_SECRET` **(secret)** | runtime | (the dev pay service's webhook secret) | (the prod pay service's webhook secret) | Shared secret the kernel pay service presents on POST /api/webhook/payment (Authorization: Bearer …). Unset -> the webhook answers 500 and tips never complete. |
 
 ## Claiming a fresh deployment
+
+Kernel callbacks use the existing public `IMAJIN_APP_DID` and `AUTH_SERVICE_URL`: the kernel signs,
+the app verifies. No shared callback credential belongs in any env file or setup step. Preserve
+the SDK's public pins and single-worker replay protection as described in
+[Deploying coffee](./DEPLOY.md#kernel-signed-payment-callbacks).
 
 No claim code belongs in env. Without a keystore, the app boots unclaimed and points the operator to
 `/coffee/claim`. Approve provisioning on `/jin`, paste its one-time code in that browser page, and the app
@@ -164,10 +169,9 @@ AUTH_SERVICE_URL=https://dev-jin.imajin.ai/auth
 REGISTRY_SERVICE_URL=https://dev-jin.imajin.ai/registry
 PAY_SERVICE_URL=https://dev-jin.imajin.ai/pay
 
-# Shared secrets (never commit real values): provision through the approved secret tools;
-# WEBHOOK_SECRET must equal the dev pay service's webhook secret.
+# Session credential: provision through the approved secret tool; never commit real values.
+# Kernel callbacks are signed and verified with public keys, not a shared credential.
 SESSION_SECRET=REPLACE_ME
-WEBHOOK_SECRET=REPLACE_ME
 
 # --- Identity (operator step: README "Identity", docs/REGISTRATION.md) ---
 IMAJIN_APP_DID=did:imajin:REPLACE_ME
@@ -208,10 +212,9 @@ AUTH_SERVICE_URL=https://jin.imajin.ai/auth
 REGISTRY_SERVICE_URL=https://jin.imajin.ai/registry
 PAY_SERVICE_URL=https://jin.imajin.ai/pay
 
-# Shared secrets (never commit real values): provision through the approved secret tools;
-# WEBHOOK_SECRET must equal the prod pay service's webhook secret.
+# Session credential: provision through the approved secret tool; never commit real values.
+# Kernel callbacks are signed and verified with public keys, not a shared credential.
 SESSION_SECRET=REPLACE_ME
-WEBHOOK_SECRET=REPLACE_ME
 
 # --- Identity (operator step: README "Identity", docs/REGISTRATION.md) ---
 IMAJIN_APP_DID=did:imajin:REPLACE_ME

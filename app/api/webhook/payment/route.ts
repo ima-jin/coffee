@@ -1,20 +1,19 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { eq } from 'drizzle-orm';
+import { KernelWebhookError, verifyKernelWebhook } from '@ima-jin/auth/kernel-webhook';
 import { createLogger } from '@ima-jin/logger';
 import { db, tips, type Tip } from '@/db';
 import { STRIPE_BYO_RAIL } from '@/lib/card-rail';
-import { webhookSecret } from '@/lib/env';
 import { settleTip } from '@/lib/settle';
 import type { PayeeManifest } from '@/lib/tip-manifest';
 
 const log = createLogger('coffee');
 
-/** Constant-time check of the `Authorization: Bearer <WEBHOOK_SECRET>` header. */
-function isAuthorized(authHeader: string | null, secret: string): boolean {
-  if (!authHeader) return false;
-  const digest = (value: string) => createHash('sha256').update(value).digest();
-  return timingSafeEqual(digest(authHeader), digest(`Bearer ${secret}`));
+interface PaymentCallback {
+  type: string;
+  tipId?: string;
+  paymentId?: string;
+  rail?: string;
 }
 
 /** True when a stored `payee_manifest` has the `{ chain: [...] }` shape settle posts back. */
@@ -91,17 +90,26 @@ async function handlePaymentSucceeded(params: {
  * POST /api/webhook/payment - Receives payment callbacks from pay service
  */
 export async function POST(request: NextRequest) {
-  const secret = webhookSecret();
-  if (!secret) {
-    return Response.json({ error: 'Webhook not configured' }, { status: 500 });
-  }
-
-  if (!isAuthorized(request.headers.get('authorization'), secret)) {
+  let callback: PaymentCallback;
+  try {
+    // The SDK authenticates the exact bytes before JSON parsing and atomically
+    // consumes the nonce. Never derive the expected audience from the request.
+    callback = await verifyKernelWebhook<PaymentCallback>(request, {
+      audience: process.env.IMAJIN_APP_DID ?? '',
+      authServiceUrl: process.env.AUTH_SERVICE_URL,
+    });
+  } catch (error) {
+    if (!(error instanceof KernelWebhookError) || ['STORE', 'DISCOVERY', 'TRUST'].includes(error.code)) {
+      return Response.json({ error: 'Webhook verification unavailable' }, { status: 503 });
+    }
+    if (error.code === 'INVALID_BODY') {
+      return Response.json({ error: 'Invalid webhook body' }, { status: 400 });
+    }
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
-    const { type, tipId, paymentId, rail } = await request.json();
+    const { type, tipId, paymentId, rail } = callback;
 
     if (!tipId) {
       return Response.json({ received: true }); // Not a tip event
