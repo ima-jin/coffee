@@ -157,6 +157,18 @@ describe('vault-backed boot and sessions', () => {
     expect(loadFromVault).not.toHaveBeenCalled();
   });
 
+  it('also names the required secret when an unreachable kernel fails the preceding signing-key fetch', async () => {
+    fetchMock.mockRejectedValue(new Error('FAKE_PROVIDER_SENSITIVE_TEXT'));
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(register()).rejects.toMatchObject({
+      name: 'SelfSecretsUnavailableError',
+      message: new SelfSecretsUnavailableError().message,
+    });
+    expect(loadFromVault).not.toHaveBeenCalled();
+    expect(isAppClaimed()).toBe(false);
+    expect(log).not.toHaveBeenCalled();
+  });
+
   it('shares memory across separately loaded instrumentation and route modules', async () => {
     await register();
     vi.resetModules();
