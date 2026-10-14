@@ -7,7 +7,12 @@ import { bootstrapSigningIdentity, isAppClaimed, resetSigningIdentityForTests } 
 import { resetClaimRateLimitForTests } from '@/lib/claim-rate-limit';
 import { middleware } from '../../../../middleware';
 import { NextRequest } from 'next/server';
+import { GET as health } from '../../health/route';
 import { POST } from '../route';
+vi.mock('@/lib/migration-status', () => ({
+  checkAppMigrations: async () => ({ migrationHead: 'test', appliedCount: 1, pendingCount: 0 }),
+  hasPendingMigrations: () => false,
+}));
 
 const KERNEL_URL = 'https://dev-jin.imajin.test';
 const RATE_LIMIT = 5;
@@ -52,6 +57,7 @@ describe('POST /api/claim', () => {
     vi.stubEnv('NEXT_PUBLIC_BASE_PATH', '/coffee');
     await bootstrapSigningIdentity();
     expect(isAppClaimed()).toBe(false);
+    expect(await (await health()).json()).toMatchObject({ status: 'ok', claimed: false });
     const request = new NextRequest('http://localhost:3000/');
     const unclaimed = middleware(request);
     expect(await unclaimed.text()).toContain('href="/coffee/claim"');
@@ -72,6 +78,7 @@ describe('POST /api/claim', () => {
     const keystoreStat = await stat(join(workDir, 'keystore.json'));
     expect(keystoreStat.mode & 0o777).toBe(0o600);
     expect(isAppClaimed()).toBe(true);
+    expect(await (await health()).json()).toMatchObject({ status: 'ok', claimed: true });
     expect(middleware(request).headers.get('x-middleware-next')).toBe('1');
     expect(middleware(new NextRequest('http://localhost:3000/claim')).status).toBe(404);
     expect(log).not.toHaveBeenCalled();

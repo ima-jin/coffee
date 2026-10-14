@@ -228,12 +228,15 @@ describe('check-env CLI', () => {
       NEXT_PUBLIC_IMAJIN_APP_ID: 'app_abc123',
       SESSION_SECRET: 'session-secret-value',
       WEBHOOK_SECRET: 'webhook-secret-value',
+      IMAJIN_APP_CLAIM_CODE: 'FAKE_ENV_CLAIM_CODE',
       DATABASE_URL: 'postgres://coffee:pw@localhost:5432/db',
     });
     writeFileSync(file, filled.map(([name, value]) => `${name}=${value}`).join('\n'));
     const result = cli(['prod', '--file', file]);
     expect(result.status).toBe(0);
     expect(result.stdout).toMatch(/is valid for prod/);
+    expect(result.stdout + result.stderr).not.toContain('IMAJIN_APP_CLAIM_CODE');
+    expect(result.stdout + result.stderr).not.toContain('FAKE_ENV_CLAIM_CODE');
   });
 
   it('exits 1 for an invalid file without echoing any value', () => {
