@@ -64,16 +64,16 @@ these commands on the server.
 Dev and prod are separate identities: each has its own app DID, claim code, keystore and `SESSION_SECRET`.
 
 1. **Mint the app identity** through the kernel's claim flow — see [Identity](../README.md#identity). In short:
-   register the app and approve `apps.provision` on `/jin` to get a one-time **claim code**, put it in
-   `.env.local` as `IMAJIN_APP_CLAIM_CODE` together with `IMAJIN_APP_DID`, and deploy. On that first boot
-   `instrumentation.ts` spends the code and writes the 0600 keystore (`IMAJIN_APP_KEYSTORE`). **Then delete
-   `IMAJIN_APP_CLAIM_CODE` from `.env.local`.** `check-env.mjs` warns while it is still set and fails while
-   `IMAJIN_APP_DID` is still the `REPLACE_ME` placeholder. No key material is ever written to the repo, the env
-   file, or the logs.
+   register the app, set the non-secret `IMAJIN_APP_DID`, and deploy. It boots unclaimed if no keystore
+   exists. Approve `apps.provision` on `/jin`, then paste its one-time **claim code** in this deployment's
+   `/coffee/claim` page. The app writes the 0600 keystore (`IMAJIN_APP_KEYSTORE`) and goes live immediately,
+   without an env edit or restart. `check-env.mjs` fails while `IMAJIN_APP_DID` is still the `REPLACE_ME`
+   placeholder. No key material is ever written to the repo, the env file, or the logs.
 2. **Create the databases/roles** and put the connection strings in each `.env.local`. Prod/dev already contain
    the `coffee` schema with real tips data; the baseline adopts it in place.
-3. **Fill in the secrets** — `SESSION_SECRET` (`openssl rand -hex 32`), `WEBHOOK_SECRET` (must equal the matching
-   pay service's).
+3. **Provision the remaining secrets through the approved secret tools** — `SESSION_SECRET` and the matching
+   pay service's `WEBHOOK_SECRET`. Never hand-generate or copy values in a shell. Their vault migration is
+   separate kernel work; if the required tool is unavailable, stop rather than working around it.
    Settlement needs no key in the env: coffee settles with its own app-service token. The operator must **approve the
    `pay:settle` service scope for this app's DID** (propose it via `POST /api/apps/service-scopes`, countersign on the
    `apps:service-scopes` card on `/jin`) — until then the token mint drops the scope and pay refuses checkout and settle.
@@ -176,11 +176,10 @@ rollback is only safe while migrations stay additive (the same stance as imajin-
 - **`baseline` exits 1** — the message lists exactly what differs. Do not edit the script to force it; fix the schema
   (or tell the app owner the schema drifted), then re-run.
 - **`env check` fails** — each line names a variable; see [ENVIRONMENTS.md](./ENVIRONMENTS.md).
-- **Health never goes green on a first boot** — `pm2 logs <name>`: a used/rejected `IMAJIN_APP_CLAIM_CODE`, a
-  missing code with no keystore, or a wrong `IMAJIN_APP_DID` fails at `instrumentation.ts`. The dev and prod
-  instances must each have their own DID, claim code and keystore.
-- **Restart after a lost keystore fails** — ask the kernel operator to re-approve `apps.provision` with
-  `reissueClaim: true` for a fresh code (redeeming it also revokes the lost keystore's bootstrap key).
+- **Health reports `claimed: false`** — the app is booted but unclaimed. Approve provisioning on `/jin` and
+  redeem the code on this deployment's `/coffee/claim` page. Dev and prod have separate DIDs and keystores.
+- **Keystore lost** — the app boots unclaimed. Ask the kernel operator to re-approve `apps.provision` with
+  `reissueClaim: true`, then redeem the fresh code on `/coffee/claim` (this revokes the lost bootstrap key).
 - **Health reports `degraded`** — committed migrations are not yet recorded as applied; re-run the deploy (or
   `scripts/migrate-baseline.mjs` then `pnpm db:migrate`).
 - **Login loops on dev only** — `IMAJIN_ENV=dev` is missing (wrong session cookie name).

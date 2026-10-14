@@ -72,7 +72,10 @@ describe('env contract coverage', () => {
       const dist = join(base, pkg, 'dist');
       for (const file of walk(dist)) {
         for (const name of envNamesIn(readFileSync(file, 'utf8'))) {
-          if (!manifest.has(name)) undocumented.push(`${name} (@ima-jin/${pkg})`);
+          // The SDK fallback is explicitly disabled by our empty claimCode
+          // boot option; it must not become an app env configuration entry.
+          const disabledClaimFallback = pkg === 'auth-client' && name === 'IMAJIN_APP_CLAIM_CODE';
+          if (!manifest.has(name) && !disabledClaimFallback) undocumented.push(`${name} (@ima-jin/${pkg})`);
         }
       }
     }
@@ -85,6 +88,21 @@ describe('env contract coverage', () => {
     for (const name of ENV_VAR_NAMES) {
       expect(example, `.env.example is missing ${name}`).toMatch(new RegExp(`^#?\\s*${name}=|^# ${name}\\b`, 'm'));
       expect(docs, `docs/ENVIRONMENTS.md is missing ${name}`).toContain(`\`${name}\``);
+    }
+  });
+
+  it('removes IMAJIN_APP_CLAIM_CODE from the env contract, runtime and all operator docs', () => {
+    expect(manifest.has('IMAJIN_APP_CLAIM_CODE')).toBe(false);
+    const files = [
+      '.env.example', '.env.dev.example', '.env.prod.example', 'README.md', 'AGENTS.md',
+      'instrumentation.ts', 'middleware.ts', 'scripts/check-env.mjs',
+      'scripts/lib/env-manifest.mjs', 'scripts/lib/env-vars.json',
+      ...walk(join(ROOT, 'app')), ...walk(join(ROOT, 'src')),
+      ...readdirSync(join(ROOT, 'docs')).filter((file) => file.endsWith('.md')).map((file) => `docs/${file}`),
+    ];
+    for (const file of files) {
+      const source = readFileSync(file.startsWith(ROOT) ? file : join(ROOT, file), 'utf8');
+      expect(source, file).not.toContain('IMAJIN_APP_CLAIM_CODE');
     }
   });
 
@@ -180,13 +198,13 @@ describe('validateEnv', () => {
     expect(errors).toMatch(/must start with did:imajin:/);
   });
 
-  it('warns (without failing) about first-boot, port and logging leftovers', () => {
+  it('ignores IMAJIN_APP_CLAIM_CODE while warning about port and logging leftovers', () => {
     const { errors, warnings } = validateEnv(
-      { ...validProd(), IMAJIN_APP_CLAIM_CODE: 'once', PORT: '9999', LOG_DB_TRANSPORT: 'true' },
+      { ...validProd(), IMAJIN_APP_CLAIM_CODE: 'FAKE_ENV_CLAIM_CODE', PORT: '9999', LOG_DB_TRANSPORT: 'true' },
       'prod',
     );
     expect(errors).toEqual([]);
-    expect(warnings.join('\n')).toMatch(/IMAJIN_APP_CLAIM_CODE is set/);
+    expect(warnings.join('\n')).not.toContain('IMAJIN_APP_CLAIM_CODE');
     expect(warnings.join('\n')).toMatch(/PORT is set/);
     expect(warnings.join('\n')).toMatch(/LOG_DB_TRANSPORT=true/);
   });
