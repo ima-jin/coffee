@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ appDid: identity.appDid, publicKey: identity.publicKey });
   } catch (error) {
     if (error instanceof SelfSecretsUnavailableError) {
-      console.error(error.message);
+      console.log(error.message);
       return NextResponse.json({ error: error.message }, { status: 503 });
     }
     if (error instanceof AppDidMismatchError) {

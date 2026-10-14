@@ -51,7 +51,7 @@ export async function register(): Promise<void> {
       if (error instanceof SelfSecretsUnavailableError) {
         // Next logs instrumentation rejections but can leave its listener alive.
         // Emit only the sanitized diagnostic and abort before serving requests.
-        console.error(error.message);
+        console.log(error.message);
         process.exit(1);
       }
       throw error;

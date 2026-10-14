@@ -134,7 +134,7 @@ describe('vault-backed boot and sessions', () => {
         if (failure !== 'missing') values.SESSION_SECRET = failure === 'empty' ? '' : FAKE_SESSION;
         vi.mocked(loadFromVault).mockResolvedValue({ values, degraded: failure === 'degraded' ? ['SESSION_SECRET'] : [] });
       }
-      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
       const error = await register().catch((reason: unknown) => reason);
       expect(error).toMatchObject({ name: 'SelfSecretsUnavailableError' });
       const safeError = error as Error;
@@ -161,7 +161,7 @@ describe('vault-backed boot and sessions', () => {
 
   it('also names the required secret when an unreachable kernel fails the preceding signing-key fetch', async () => {
     fetchMock.mockRejectedValue(new Error('FAKE_PROVIDER_SENSITIVE_TEXT'));
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     await expect(register()).rejects.toMatchObject({
       name: 'SelfSecretsUnavailableError',
       message: new SelfSecretsUnavailableError().message,

@@ -93,7 +93,7 @@ describe('POST /api/claim', () => {
   });
 
   it('fails closed after claim when vault loading fails, logging one names-only re-sync line', async () => {
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     mockKernelClaim({
       appDid: 'did:imajin:app-under-test',
       privateKey: 'FAKE_SIGNING_KEY',
