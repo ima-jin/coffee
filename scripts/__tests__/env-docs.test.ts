@@ -95,7 +95,8 @@ describe('env contract coverage', () => {
     expect(manifest.has('IMAJIN_APP_CLAIM_CODE')).toBe(false);
     const files = [
       '.env.example', '.env.dev.example', '.env.prod.example', 'README.md', 'AGENTS.md',
-      'instrumentation.ts', 'middleware.ts', 'scripts/check-env.mjs', 'scripts/deploy.sh',
+      // check-env alone retains a names-only cleanup warning for stale env files.
+      'instrumentation.ts', 'middleware.ts', 'scripts/deploy.sh',
       'scripts/lib/env-manifest.mjs', 'scripts/lib/env-vars.json',
       ...walk(join(ROOT, 'app')), ...walk(join(ROOT, 'src')),
       ...readdirSync(join(ROOT, 'docs')).filter((file) => file.endsWith('.md')).map((file) => `docs/${file}`),
@@ -198,13 +199,12 @@ describe('validateEnv', () => {
     expect(errors).toMatch(/must start with did:imajin:/);
   });
 
-  it('ignores IMAJIN_APP_CLAIM_CODE while warning about port and logging leftovers', () => {
+  it('warns about port and logging leftovers', () => {
     const { errors, warnings } = validateEnv(
-      { ...validProd(), IMAJIN_APP_CLAIM_CODE: 'FAKE_ENV_CLAIM_CODE', PORT: '9999', LOG_DB_TRANSPORT: 'true' },
+      { ...validProd(), PORT: '9999', LOG_DB_TRANSPORT: 'true' },
       'prod',
     );
     expect(errors).toEqual([]);
-    expect(warnings.join('\n')).not.toContain('IMAJIN_APP_CLAIM_CODE');
     expect(warnings.join('\n')).toMatch(/PORT is set/);
     expect(warnings.join('\n')).toMatch(/LOG_DB_TRANSPORT=true/);
   });
@@ -220,10 +220,13 @@ describe('check-env CLI', () => {
 
   const cli = (args: string[]) => spawnSync(process.execPath, [CHECK_ENV, ...args], { env: childEnv(), encoding: 'utf8', cwd: dir });
 
-  it('exits 0 for a valid file and prints names/messages only', () => {
+  it.each([
+    ['dev', '.env.dev.example'],
+    ['prod', '.env.prod.example'],
+  ] as const)('warns exactly once about an ignored stale claim code on %s, with zero errors and no value echoed', (target, example) => {
     const file = join(dir, 'ok.env');
     const filled = Object.entries({
-      ...parseEnv(read('.env.prod.example')),
+      ...parseEnv(read(example)),
       IMAJIN_APP_DID: 'did:imajin:abc123',
       NEXT_PUBLIC_IMAJIN_APP_ID: 'app_abc123',
       SESSION_SECRET: 'session-secret-value',
@@ -232,10 +235,12 @@ describe('check-env CLI', () => {
       DATABASE_URL: 'postgres://coffee:pw@localhost:5432/db',
     });
     writeFileSync(file, filled.map(([name, value]) => `${name}=${value}`).join('\n'));
-    const result = cli(['prod', '--file', file]);
+    const result = cli([target, '--file', file]);
     expect(result.status).toBe(0);
-    expect(result.stdout).toMatch(/is valid for prod/);
-    expect(result.stdout + result.stderr).not.toContain('IMAJIN_APP_CLAIM_CODE');
+    expect(result.stdout).toBe(`${file} is valid for ${target}.\n`);
+    expect(result.stderr).toBe(
+      'warn:  IMAJIN_APP_CLAIM_CODE is ignored — claim at /coffee/claim and delete IMAJIN_APP_CLAIM_CODE from the env file.\n',
+    );
     expect(result.stdout + result.stderr).not.toContain('FAKE_ENV_CLAIM_CODE');
   });
 
