@@ -9,8 +9,21 @@ import { createLogger } from '@ima-jin/logger';
 import { rateLimit, getClientIP } from '@ima-jin/config';
 import { payServiceUrl, publicAppUrl } from '@/lib/env';
 import { optionalAuthenticate, authErrorResponse } from '@/lib/auth/authenticate';
+import { db } from '@/db';
+import { getAppServiceToken } from '@/lib/app-service-token';
 
 const log = createLogger('coffee');
+
+function supportItem(amount: number, recurring: boolean) {
+  return {
+    name: recurring ? 'Support Imajin (Monthly)' : 'Support Imajin',
+    description: recurring
+      ? 'Monthly support for sovereign infrastructure development'
+      : 'One-time support for sovereign infrastructure development',
+    amount,
+    quantity: 1,
+  };
+}
 
 export async function POST(request: NextRequest) {
   const ip = getClientIP(request);
@@ -25,10 +38,28 @@ export async function POST(request: NextRequest) {
   try {
     const authResult = await optionalAuthenticate(request);
     if ('error' in authResult) return authErrorResponse(authResult);
-    const { amount, recurring, joinMailingList } = await request.json();
+    const { pageHandle, amount, recurring, joinMailingList } = await request.json();
 
-    if (!amount || amount < 500) {
-      return NextResponse.json({ error: 'Minimum amount is $5' }, { status: 400 });
+    if (!Number.isSafeInteger(amount) || amount < 500) {
+      return NextResponse.json({ error: 'Amount must be an integer in cents (minimum $5)' }, { status: 400 });
+    }
+    if (typeof pageHandle !== 'string' || !pageHandle.trim()) {
+      return NextResponse.json({ error: 'pageHandle is required' }, { status: 400 });
+    }
+
+    const page = await db.query.coffeePages.findFirst({
+      where: (pages, { eq }) => eq(pages.handle, pageHandle),
+    });
+    if (!page) {
+      return NextResponse.json({ error: 'Coffee page not found' }, { status: 404 });
+    }
+    if (!page.isPublic) {
+      return NextResponse.json({ error: 'This page is not accepting support' }, { status: 403 });
+    }
+
+    const appToken = await getAppServiceToken().catch(() => null);
+    if (!appToken) {
+      return NextResponse.json({ error: 'Payment service unavailable; please retry checkout' }, { status: 503 });
     }
 
     const metadata: Record<string, string> = {
@@ -40,19 +71,11 @@ export async function POST(request: NextRequest) {
     const baseUrl = publicAppUrl();
     const payRes = await fetch(`${payServiceUrl()}/api/checkout`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${appToken}` },
       body: JSON.stringify({
+        sellerDid: page.did,
         mode: recurring ? 'subscription' : 'payment',
-        items: [
-          {
-            name: recurring ? 'Support Imajin (Monthly)' : 'Support Imajin',
-            description: recurring
-              ? 'Monthly support for sovereign infrastructure development'
-              : 'One-time support for sovereign infrastructure development',
-            amount,
-            quantity: 1,
-          },
-        ],
+        items: [supportItem(amount, recurring)],
         currency: 'USD',
         successUrl: `${baseUrl}/success?type=${recurring ? 'subscription' : 'onetime'}`,
         cancelUrl: baseUrl,
@@ -61,15 +84,14 @@ export async function POST(request: NextRequest) {
     });
 
     if (!payRes.ok) {
-      const err = await payRes.text();
-      log.error({ err }, 'Pay service checkout failed');
+      log.error({ status: payRes.status }, 'Pay service checkout failed');
       return NextResponse.json({ error: 'Failed to create checkout' }, { status: 500 });
     }
 
     const payData = await payRes.json();
     return NextResponse.json({ url: payData.url });
-  } catch (error) {
-    log.error({ err: String(error) }, 'Checkout error');
+  } catch {
+    log.error({}, 'Checkout error');
     return NextResponse.json({ error: 'Failed to create checkout' }, { status: 500 });
   }
 }

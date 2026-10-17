@@ -1,9 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ rateLimitMock: vi.fn(), fetchMock: vi.fn(), authenticateMock: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  rateLimitMock: vi.fn(),
+  fetchMock: vi.fn(),
+  authenticateMock: vi.fn(),
+  findFirstMock: vi.fn(),
+  getAppServiceTokenMock: vi.fn(),
+  logErrorMock: vi.fn(),
+}));
 
-vi.mock('@ima-jin/logger', () => ({ createLogger: () => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn() }) }));
+vi.mock('@ima-jin/logger', () => ({ createLogger: () => ({ error: mocks.logErrorMock, warn: vi.fn(), info: vi.fn() }) }));
 vi.mock('@ima-jin/config', () => ({ rateLimit: mocks.rateLimitMock, getClientIP: () => '127.0.0.1' }));
+vi.mock('@/db', () => ({
+  db: { query: { coffeePages: { findFirst: mocks.findFirstMock } } },
+}));
+vi.mock('@/lib/app-service-token', () => ({ getAppServiceToken: mocks.getAppServiceTokenMock }));
 
 vi.mock('@ima-jin/auth', () => ({ requireSessionOrAppToken: mocks.authenticateMock }));
 vi.mock('@ima-jin/auth-client', () => ({ getSession: vi.fn().mockResolvedValue(null) }));
@@ -19,7 +30,8 @@ function makeRequest(body: unknown): Parameters<typeof POST>[0] {
   }) as Parameters<typeof POST>[0];
 }
 
-const VALID_BODY = { amount: 1000, recurring: false, joinMailingList: false };
+const PAGE = { handle: 'imajin', did: 'did:imajin:page-owner', isPublic: true };
+const VALID_BODY = { pageHandle: PAGE.handle, amount: 1000, recurring: false, joinMailingList: false };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -29,6 +41,8 @@ beforeEach(() => {
   vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://coffee.test');
   vi.stubEnv('NEXT_PUBLIC_BASE_PATH', '');
   mocks.rateLimitMock.mockReturnValue({ limited: false, retryAfter: 0 });
+  mocks.findFirstMock.mockResolvedValue(PAGE);
+  mocks.getAppServiceTokenMock.mockResolvedValue('test-app-service-token');
   mocks.fetchMock.mockResolvedValue({ ok: true, json: async () => ({ url: 'https://checkout.test/session_1' }) });
 });
 
@@ -42,6 +56,18 @@ describe('POST /api/checkout', () => {
     expect(await res.json()).toEqual({ url: 'https://checkout.test/session_1' });
     expect(mocks.fetchMock).toHaveBeenCalledOnce();
     expect(mocks.fetchMock.mock.calls[0][0]).toBe('https://kernel.test/pay/api/checkout');
+    expect(mocks.fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer test-app-service-token');
+    expect(JSON.parse(mocks.fetchMock.mock.calls[0][1].body).sellerDid).toBe(PAGE.did);
+  });
+
+  it('uses the resolved owner of a different page, not a fixed seller or the payer', async () => {
+    mocks.findFirstMock.mockResolvedValue({ ...PAGE, handle: 'another-page', did: 'did:imajin:another-owner' });
+    mocks.authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:payer', via: 'cookie', scopes: [] } });
+
+    const res = await POST(makeRequest({ ...VALID_BODY, pageHandle: 'another-page', sellerDid: 'did:imajin:attacker' }));
+
+    expect(res.status).toBe(200);
+    expect(JSON.parse(mocks.fetchMock.mock.calls[0][1].body).sellerDid).toBe('did:imajin:another-owner');
   });
 
   it.each([403, 503])('does not downgrade an auth failure (%s) to anonymous checkout', async (status) => {
@@ -73,11 +99,98 @@ describe('POST /api/checkout', () => {
     expect(mocks.fetchMock).not.toHaveBeenCalled();
   });
 
-  it.each([{}, { amount: 499 }])('rejects an amount below the $5 minimum (%j)', async (body) => {
-    const res = await POST(makeRequest(body));
+  it.each([undefined, null, 0, -1, 499, 500.5, '1000', true, [], {}, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects invalid or below-minimum cents (%j)', async (amount) => {
+      const res = await POST(makeRequest({ ...VALID_BODY, amount }));
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe('Amount must be an integer in cents (minimum $5)');
+      expect(mocks.findFirstMock).not.toHaveBeenCalled();
+      expect(mocks.getAppServiceTokenMock).not.toHaveBeenCalled();
+      expect(mocks.fetchMock).not.toHaveBeenCalled();
+    });
+
+  it.each(['1e400', 'NaN'])('does not forward a non-finite amount (%s)', async (amount) => {
+    const res = await POST(makeRequest(`{"pageHandle":"imajin","amount":${amount}}`));
+
+    expect(res.ok).toBe(false);
+    expect(mocks.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, null, '', '  ', 123, {}, []])('requires a page handle (%j)', async (pageHandle) => {
+    const res = await POST(makeRequest({ ...VALID_BODY, pageHandle }));
 
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe('Minimum amount is $5');
+    expect((await res.json()).error).toBe('pageHandle is required');
+    expect(mocks.findFirstMock).not.toHaveBeenCalled();
+    expect(mocks.getAppServiceTokenMock).not.toHaveBeenCalled();
+    expect(mocks.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('queries the requested page by handle, not by client-supplied owner', async () => {
+    await POST(makeRequest({ ...VALID_BODY, sellerDid: 'did:imajin:attacker' }));
+
+    const { where } = mocks.findFirstMock.mock.calls[0][0];
+    const eq = vi.fn();
+    where({ handle: 'handle-column' }, { eq });
+    expect(eq).toHaveBeenCalledWith('handle-column', PAGE.handle);
+    const sent = JSON.parse(mocks.fetchMock.mock.calls[0][1].body);
+    expect(sent.sellerDid).toBe(PAGE.did);
+  });
+
+  it('ignores spoofed seller fields in the body and metadata', async () => {
+    const res = await POST(makeRequest({
+      ...VALID_BODY,
+      sellerDid: 'did:imajin:attacker',
+      metadata: { sellerDid: 'did:imajin:attacker' },
+    }));
+
+    expect(res.status).toBe(200);
+    const sent = JSON.parse(mocks.fetchMock.mock.calls[0][1].body);
+    expect(sent.sellerDid).toBe(PAGE.did);
+    expect(sent.metadata.sellerDid).toBeUndefined();
+    expect(mocks.fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer test-app-service-token');
+  });
+
+  it('returns 404 without minting or calling pay for a missing page', async () => {
+    mocks.findFirstMock.mockResolvedValue(undefined);
+    const res = await POST(makeRequest(VALID_BODY));
+
+    expect(res.status).toBe(404);
+    expect(mocks.getAppServiceTokenMock).not.toHaveBeenCalled();
+    expect(mocks.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not accept support for a private page', async () => {
+    mocks.findFirstMock.mockResolvedValue({ ...PAGE, isPublic: false });
+    const res = await POST(makeRequest(VALID_BODY));
+
+    expect(res.status).toBe(403);
+    expect(mocks.getAppServiceTokenMock).not.toHaveBeenCalled();
+    expect(mocks.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('fails closed on mint failure without logging details, then allows a retry (recurring=%s)', async (recurring) => {
+    mocks.getAppServiceTokenMock.mockRejectedValueOnce(new Error('private mint diagnostic'));
+    const res = await POST(makeRequest({ ...VALID_BODY, recurring }));
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'Payment service unavailable; please retry checkout' });
+    expect(mocks.fetchMock).not.toHaveBeenCalled();
+    expect(mocks.logErrorMock).not.toHaveBeenCalled();
+
+    const retry = await POST(makeRequest({ ...VALID_BODY, recurring }));
+    expect(retry.status).toBe(200);
+    expect(mocks.fetchMock).toHaveBeenCalledOnce();
+    expect(mocks.fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer test-app-service-token');
+  });
+
+  it('fails closed with 503 if the token source yields an empty token', async () => {
+    mocks.getAppServiceTokenMock.mockResolvedValue('');
+    const res = await POST(makeRequest(VALID_BODY));
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'Payment service unavailable; please retry checkout' });
     expect(mocks.fetchMock).not.toHaveBeenCalled();
   });
 
@@ -89,7 +202,9 @@ describe('POST /api/checkout', () => {
 
     const [url, init] = mocks.fetchMock.mock.calls[0];
     expect(url).toBe('https://kernel.test/pay/api/checkout');
+    expect(init.headers.Authorization).toBe('Bearer test-app-service-token');
     expect(JSON.parse(init.body)).toEqual({
+      sellerDid: PAGE.did,
       mode: 'payment',
       items: [
         {
@@ -107,9 +222,11 @@ describe('POST /api/checkout', () => {
   });
 
   it('creates a monthly subscription checkout and carries the mailing-list opt-in', async () => {
-    await POST(makeRequest({ amount: 500, recurring: true, joinMailingList: true }));
+    await POST(makeRequest({ ...VALID_BODY, amount: 500, recurring: true, joinMailingList: true }));
 
     const sent = JSON.parse(mocks.fetchMock.mock.calls[0][1].body);
+    expect(mocks.fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer test-app-service-token');
+    expect(sent.sellerDid).toBe(PAGE.did);
     expect(sent.mode).toBe('subscription');
     expect(sent.items[0].name).toBe('Support Imajin (Monthly)');
     expect(sent.items[0].description).toBe('Monthly support for sovereign infrastructure development');
@@ -118,12 +235,14 @@ describe('POST /api/checkout', () => {
   });
 
   it('returns 500 without leaking upstream details when pay refuses', async () => {
-    mocks.fetchMock.mockResolvedValue({ ok: false, text: async () => 'Stripe error' });
+    mocks.fetchMock.mockResolvedValue({ ok: false, status: 401, text: async () => 'private upstream diagnostic' });
 
     const res = await POST(makeRequest(VALID_BODY));
 
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ error: 'Failed to create checkout' });
+    expect(mocks.fetchMock).toHaveBeenCalledOnce();
+    expect(mocks.logErrorMock).toHaveBeenCalledWith({ status: 401 }, 'Pay service checkout failed');
   });
 
   it('returns 500 when the body cannot be parsed', async () => {
