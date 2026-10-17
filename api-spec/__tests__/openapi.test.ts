@@ -129,9 +129,12 @@ describe('api-spec/openapi.yaml', () => {
         expect(schemes, `${method} ${path}`).toContain('bearerAuth');
         expect(schemes, `${method} ${path}`).toContain('cookieAuth');
         expect(Object.keys(op.responses), `${method} ${path}`).toContain('401');
-      } else if (/optionalCallerDid\(/.test(body)) {
+      } else if (/optionalAuthenticate\(/.test(body)) {
         expect(schemes, `${method} ${path}`).toContain('bearerAuth');
-        expect(schemes, `${method} ${path}`).toContainEqual(expect.anything());
+        expect(schemes, `${method} ${path}`).toContain('cookieAuth');
+        expect(op.security, `${method} ${path}`).toContainEqual({});
+        expect(Object.keys(op.responses), `${method} ${path}`).toContain('403');
+        expect(Object.keys(op.responses), `${method} ${path}`).toContain('503');
       } else {
         expect(schemes, `${method} ${path}`).not.toContain('bearerAuth');
       }

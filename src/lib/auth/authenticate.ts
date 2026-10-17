@@ -2,6 +2,8 @@ import { requireSessionOrAppToken } from '@ima-jin/auth';
 import { getSession } from '@ima-jin/auth-client';
 import { authConfig } from '@/lib/auth-config';
 import { APP_SLUG } from '@/lib/env';
+import { evaluateCoffeeDelegationPolicy } from '@/lib/delegation-policy';
+import type { DelegationPolicyBody } from '@ima-jin/auth/delegation-policy';
 
 /**
  * This app's entire inbound-auth surface, funneled through one function so
@@ -32,16 +34,34 @@ export interface AuthenticatedCaller {
   scopes: string[];
   /**
    * Owner DID when the caller is an agent acting under `X-Acting-For`; feeds the
-   * delegation policy (#2360). No path of this adapter sets it today — the
-   * scoped-token and cookie paths carry no delegation overlay — so the policy
-   * only engages once one does.
+   * delegation policy (#2360). The SDK verifies the grant on token/cookie paths.
+   * Coffee still uses the caller DID, never this owner DID, for ownership.
    */
   actingFor?: string;
   /** Which path authenticated this request — for logging/debugging only. */
   via: 'token' | 'cookie' | 'session';
 }
 
-export type AuthenticateResult = { auth: AuthenticatedCaller } | { error: string; status: number };
+export interface AuthenticationError {
+  error: string;
+  status: number;
+  /** Complete SDK proposal; never reduce this to just the human-readable error. */
+  proposal?: DelegationPolicyBody;
+}
+
+export type AuthenticateResult = { auth: AuthenticatedCaller } | AuthenticationError;
+
+export function authErrorResponse(result: AuthenticationError): Response {
+  return Response.json(result.proposal ?? { error: result.error }, { status: result.status });
+}
+
+async function authorizeMutation(request: Request, auth: AuthenticatedCaller): Promise<AuthenticateResult> {
+  const decision = await evaluateCoffeeDelegationPolicy(request, { id: auth.did, actingFor: auth.actingFor });
+  if (!decision.allowed) {
+    return { error: decision.body.error, status: decision.status, proposal: decision.body };
+  }
+  return { auth };
+}
 
 async function readOwnSession(): Promise<string | null> {
   try {
@@ -56,7 +76,7 @@ async function readOwnSession(): Promise<string | null> {
 export async function authenticate(request: Request): Promise<AuthenticateResult> {
   const result = await requireSessionOrAppToken(request, { slug: APP_SLUG });
   if ('auth' in result) {
-    return { auth: result.auth };
+    return authorizeMutation(request, result.auth);
   }
   if (result.status !== 401) {
     return { error: result.error, status: result.status };
@@ -64,12 +84,20 @@ export async function authenticate(request: Request): Promise<AuthenticateResult
 
   const did = await readOwnSession();
   if (did) {
-    return { auth: { did, scopes: [], via: 'session' } };
+    return authorizeMutation(request, { did, scopes: [], via: 'session' });
   }
   return { error: result.error, status: result.status };
 }
 
 /** Best-effort caller DID for routes that also serve anonymous callers. */
+export async function optionalAuthenticate(request: Request): Promise<{ auth: AuthenticatedCaller | null } | AuthenticationError> {
+  const result = await authenticate(request);
+  // Public mutations may be anonymous, but a refusal must never become anonymous success.
+  if ('error' in result && result.status === 401) return { auth: null };
+  return result;
+}
+
+/** Best-effort caller DID for read-only consumers. Do not use for mutations. */
 export async function optionalCallerDid(request: Request): Promise<string | null> {
   const result = await authenticate(request);
   return 'auth' in result ? result.auth.did : null;

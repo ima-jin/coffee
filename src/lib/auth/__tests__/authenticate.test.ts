@@ -9,13 +9,71 @@ vi.mock('@ima-jin/auth', () => ({ requireSessionOrAppToken: mocks.requireSession
 vi.mock('@ima-jin/auth-client', () => ({ getSession: mocks.getSessionMock }));
 vi.mock('@/lib/auth-config', () => ({ authConfig: { secret: 'test-secret' } }));
 
-import { authenticate, optionalCallerDid } from '../authenticate';
+import { authenticate, optionalAuthenticate, optionalCallerDid, authErrorResponse } from '../authenticate';
+import { evaluateDelegationPolicy } from '@ima-jin/auth/delegation-policy';
 
 const request = new Request('https://coffee.imajin.ai/api/pages/mine');
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getSessionMock.mockResolvedValue(null);
+});
+
+describe('delegation at the shared auth boundary', () => {
+  it.each(['token', 'cookie'])('preserves the complete SDK proposal on the %s path without session fallback', async (via) => {
+    const auth = { did: 'did:imajin:agent', actingFor: 'did:imajin:owner', via, scopes: [] };
+    mocks.requireSessionOrAppTokenMock.mockResolvedValue({ auth });
+    mocks.getSessionMock.mockResolvedValue({ did: 'did:imajin:owner' });
+    const req = new Request('https://coffee.test/api/pages/creator', { method: 'DELETE' });
+    const decision = evaluateDelegationPolicy({ id: auth.did, actingFor: auth.actingFor }, {
+      action: 'delete', class: 'irreversible', resourceId: 'creator',
+    });
+    expect(decision.allowed).toBe(false);
+    if (decision.allowed) throw new Error('Expected SDK proposal');
+    const result = await authenticate(req);
+    expect(result).toEqual({ error: decision.body.error, status: 403, proposal: decision.body });
+    if ('auth' in result) throw new Error('Expected policy denial');
+    expect(await authErrorResponse(result).json()).toEqual(decision.body);
+    expect(mocks.getSessionMock).not.toHaveBeenCalled();
+    expect(await optionalAuthenticate(req)).toEqual(result);
+  });
+
+  it('allows the owner to reissue from their own local session', async () => {
+    mocks.requireSessionOrAppTokenMock.mockResolvedValue({ error: 'No shared cookie', status: 401 });
+    mocks.getSessionMock.mockResolvedValue({ did: 'did:imajin:owner' });
+    const req = new Request('https://coffee.test/api/pages/creator', { method: 'DELETE' });
+    expect(await authenticate(req)).toEqual({ auth: { did: 'did:imajin:owner', scopes: [], via: 'session' } });
+  });
+
+  it('does not resolve actingFor into ownership for reversible requests', async () => {
+    const auth = { did: 'did:imajin:agent', actingFor: 'did:imajin:owner', via: 'token', scopes: [] };
+    mocks.requireSessionOrAppTokenMock.mockResolvedValue({ auth });
+    const req = new Request('https://coffee.test/api/pages/creator', { method: 'PUT', body: '{"title":"New"}' });
+    expect(await authenticate(req)).toEqual({ auth });
+  });
+
+  it('does not trust an unverified header as delegation on the local-session fallback', async () => {
+    mocks.requireSessionOrAppTokenMock.mockResolvedValue({ error: 'No shared cookie', status: 401 });
+    mocks.getSessionMock.mockResolvedValue({ did: 'did:imajin:agent' });
+    const req = new Request('https://coffee.test/api/pages/mine', { headers: { 'X-Acting-For': 'did:imajin:owner' } });
+    expect(await authenticate(req)).toEqual({ auth: { did: 'did:imajin:agent', scopes: [], via: 'session' } });
+  });
+
+  it('allows anonymous public requests only for a 401, not forbidden or unavailable auth', async () => {
+    for (const status of [403, 503]) {
+      const failure = { error: 'Auth refused', status };
+      mocks.requireSessionOrAppTokenMock.mockResolvedValue(failure);
+      expect(await optionalAuthenticate(request)).toEqual(failure);
+    }
+    mocks.requireSessionOrAppTokenMock.mockResolvedValue({ error: 'No session', status: 401 });
+    expect(await optionalAuthenticate(request)).toEqual({ auth: null });
+  });
+
+  it('preserves plain auth errors as well as policy proposals', async () => {
+    const response = authErrorResponse({ error: 'Not authenticated', status: 401 });
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: 'Not authenticated' });
+  });
 });
 
 describe('authenticate', () => {

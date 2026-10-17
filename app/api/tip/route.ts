@@ -4,7 +4,7 @@ import { rateLimit, getClientIP } from '@ima-jin/config';
 import { db, tips, type CoffeePage } from '@/db';
 import { getAppServiceToken } from '@/lib/app-service-token';
 import { cardRailFailure, payErrorCode } from '@/lib/card-rail';
-import { optionalCallerDid } from '@/lib/auth/authenticate';
+import { optionalAuthenticate, authErrorResponse } from '@/lib/auth/authenticate';
 import { payServiceUrl, publicAppUrl } from '@/lib/env';
 import { buildTipPayeeManifest } from '@/lib/tip-manifest';
 import { jsonResponse, errorResponse, generateId } from '@/lib/utils';
@@ -228,6 +228,8 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const authResult = await optionalAuthenticate(request);
+    if ('error' in authResult) return authErrorResponse(authResult);
     const body = await request.json();
     const {
       pageHandle,
@@ -261,7 +263,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get sender identity if authenticated
-    const fromDid = await optionalCallerDid(request);
+    const fromDid = authResult.auth?.did ?? null;
 
     // Create tip record (pending)
     const tipId = generateId('tip');

@@ -2,8 +2,7 @@ import { NextRequest } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { createLogger } from '@ima-jin/logger';
 import { db, coffeePages } from '@/db';
-import { enforceDelegationPolicy } from '@ima-jin/auth/delegation-policy';
-import { authenticate } from '@/lib/auth/authenticate';
+import { authenticate, authErrorResponse } from '@/lib/auth/authenticate';
 import { jsonResponse, errorResponse } from '@/lib/utils';
 
 const log = createLogger('coffee');
@@ -49,7 +48,7 @@ export async function PUT(request: NextRequest, props: Readonly<RouteParams>) {
   // Require authentication
   const authResult = await authenticate(request);
   if ('error' in authResult) {
-    return errorResponse(authResult.error, authResult.status);
+    return authErrorResponse(authResult);
   }
 
   const did = authResult.auth.did;
@@ -121,19 +120,10 @@ export async function DELETE(request: NextRequest, props: Readonly<RouteParams>)
   // Require authentication
   const authResult = await authenticate(request);
   if ('error' in authResult) {
-    return errorResponse(authResult.error, authResult.status);
+    return authErrorResponse(authResult);
   }
 
   const did = authResult.auth.did;
-
-  // Deleting a page is irreversible: a delegate (an agent acting for the owner)
-  // may propose it but never execute it (#2360).
-  // Standalone app routes are not in the SDK's kernel route registry.
-  const delegationDenied = enforceDelegationPolicy(
-    { id: did, actingFor: authResult.auth.actingFor },
-    { action: 'delete', class: 'irreversible', resourceId: handle },
-  );
-  if (delegationDenied) return delegationDenied;
 
   try {
     // Fetch existing page
