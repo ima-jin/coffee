@@ -6,6 +6,7 @@ import { db, tips, type Tip } from '@/db';
 import { STRIPE_BYO_RAIL } from '@/lib/card-rail';
 import { settleTip } from '@/lib/settle';
 import type { PayeeManifest } from '@/lib/tip-manifest';
+import { publishDomainEvent } from '@/lib/domain-events';
 
 const log = createLogger('coffee');
 
@@ -57,7 +58,36 @@ async function settleCompletedTip(tip: Tip, rail: string | undefined): Promise<v
   }
 }
 
-/** Handle a completed payment: mark the tip as completed and settle the .fair split */
+/** Notify using stored tip/page data, never identity or amount claims from the callback. */
+async function publishTipNotifications(tip: Tip): Promise<void> {
+  try {
+    const page = await db.query.coffeePages.findFirst({
+      where: (p, { eq: equals }) => equals(p.id, tip.pageId),
+    });
+    const payload = {
+      amount: tip.amount, currency: tip.currency, context_id: tip.id,
+      context_type: 'coffee', status: 'completed',
+    };
+    if (page) {
+      await publishDomainEvent({
+        type: 'tip.granted', subject: page.did, correlationId: tip.id,
+        payload: { ...payload, interestDids: [page.did], tipperName: tip.fromName || 'Anonymous' },
+      });
+    } else {
+      log.error({ tipId: tip.id }, '[events] Recipient page missing; tip.granted could not be delivered');
+    }
+    if (tip.fromDid) {
+      await publishDomainEvent({
+        type: 'tip.sent', subject: tip.fromDid, correlationId: tip.id,
+        payload: { ...payload, interestDids: [tip.fromDid], pageName: page?.title || 'a creator' },
+      });
+    }
+  } catch {
+    log.error({ tipId: tip.id }, '[events] Notification preparation failed (non-fatal)');
+  }
+}
+
+/** Handle a completed payment: commit completion, notify, then settle the .fair split. */
 async function handlePaymentSucceeded(params: {
   tipId: string;
   paymentId: string | undefined;
@@ -76,14 +106,11 @@ async function handlePaymentSucceeded(params: {
     where: (t, { eq: equals }) => equals(t.id, tipId),
   });
   if (tip) {
+    await publishTipNotifications(tip);
     await settleCompletedTip(tip, rail);
   } else {
     log.warn({ tipId }, '[webhook] Cannot settle tip — tip record not found');
   }
-
-  // The kernel version also published `tip.granted` / `tip.sent` to the
-  // in-process event bus here. No public HTTP surface exists for that yet —
-  // see docs/ARCHITECTURE.md (gap(kernel)).
 }
 
 /**

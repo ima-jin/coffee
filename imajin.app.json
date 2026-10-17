@@ -1,4 +1,5 @@
 {
+  "emittableEvents": ["tip.granted", "tip.sent"],
   "secrets": [
     { "name": "SESSION_SECRET", "kind": "random-32B" }
   ]

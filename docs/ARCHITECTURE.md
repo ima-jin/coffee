@@ -65,10 +65,46 @@ shares one host (#2706); a token minted for another app can never verify here. I
 No coffee-specific scopes are required (the kernel clamps requested scopes to its closed vocabulary).
 `AUTH_SERVICE_URL` (kernel auth service, `/auth` prefix) is what `@ima-jin/auth` reads to verify tokens.
 
-## Behaviour that differs from the kernel version (each tracked as a kernel gap)
+## Domain events
 
-- **No bus events.** The kernel published `tip.granted` / `tip.sent` to the in-process bus. The bus is kernel-internal and
-  has no app-callable HTTP surface, so coffee does not emit them — [ima-jin/imajin-ai#2641].
+Coffee emits `tip.granted` and `tip.sent` via `POST {IMAJIN_KERNEL_URL}/api/events`,
+not an in-process bus. `imajin.app.json` declares both in `emittableEvents`, which
+the kernel reads into the `/jin` provision/declarations preview. Declaration is
+not approval: the operator must approve the types separately for each app DID.
+
+The existing server-only token helper proves possession of coffee's claimed key
+at `POST {IMAJIN_KERNEL_URL}/auth/api/apps/token/service` and caches the returned
+app-service token. Its default `imajin:apps` audience is accepted by the events
+route. No user token, shared secret, new environment variable or publish-path
+switch is used. `IMAJIN_KERNEL_URL` must be the kernel base URL (no `/auth` or
+`/pay` prefix); `IMAJIN_APP_DID` and the claimed signing identity are required.
+Missing configuration produces an error-level diagnostic naming the setting.
+
+After an authenticated pending tip is inserted, `/api/tip` emits `tip.granted`
+with `status: pending` (the pre-split behavior, not proof of payment). After a
+successful payment callback commits completion, coffee emits recipient
+`tip.granted` and, for an identified sender, `tip.sent`, with `status: completed`.
+Amounts, currency and identities come from stored tip/page data. Anonymous tips
+still notify the recipient when completed. Payloads keep `context_id`,
+`context_type`, notification names and `interestDids`; `correlationId` is the tip
+ID. The kernel supplies the app issuer/origin and fixed scope.
+
+Each HTTP attempt has a five-second timeout. Publishing is awaited but
+best-effort: 401/403/429, transport failures and mint failures are logged without
+changing payment responses or settlement behavior. A 401 drops the cached
+token for the next attempt. No automatic event retries/outbox are provided;
+webhook redelivery can repeat notifications, and correlation IDs are for tracing,
+not a kernel deduplication guarantee. Logs omit tokens, signatures, arbitrary
+response bodies and raw transport errors.
+
+Accepted app events run **notify and audit only**. They never settle money,
+emit MJN or issue attestations. Payment settlement remains a separate API call.
+After deployment, the operator must approve both declared types on prod and dev
+`/jin`, then confirm a completed tip reaches notify and the kernel audit log with
+coffee's app DID. This is an operator step, not part of CI or this change.
+
+## Behaviour that differs from the kernel version
+
 - **Settlement is app-token based.** Coffee mints its own app-service token (`POST {kernel}/auth/api/apps/token/service`,
   proof of possession with the app key), sends it on `POST {pay}/api/checkout` together with a `payeeManifest` (so
   `pay.transactions.app_did` is coffee's DID; the returned `transactionId` is stored on the tip), then settles with

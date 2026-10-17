@@ -68,7 +68,7 @@
     "name": "IMAJIN_KERNEL_URL",
     "status": "required",
     "phase": "runtime",
-    "summary": "Kernel base URL (no path). Used to fetch this app's signing key at boot (loadAppSigningKey) and to mint its app-service token (POST /auth/api/apps/token/service) for pay checkout + settle — same host as IMAJIN_AUTH_URL.",
+    "summary": "Kernel base URL (no path). Used for signing-key boot (loadAppSigningKey), app-service token mint (POST /auth/api/apps/token/service), and domain publishing (POST /api/events), alongside pay checkout + settle. Same host as IMAJIN_AUTH_URL; required, with missing-config event failures logged at error level.",
     "dev": "https://dev-jin.imajin.ai",
     "prod": "https://jin.imajin.ai"
   },

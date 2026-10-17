@@ -11,14 +11,13 @@ const log = createLogger('coffee');
  * `POST {kernel}/auth/api/apps/token/service` (proof of possession with the
  * app key held by `loadAppSigningKey()`, see `signing-identity.ts`).
  *
- * The token is what coffee presents to the pay service — on `POST /api/checkout`
- * (binding the payment to this app's DID) and on `POST /api/settle`. It carries
- * no user identity and is never sent to a browser.
+ * Coffee presents this token to pay checkout/settle and kernel `/api/events`.
+ * Its default audience (`imajin:apps`) is served by the events endpoint.
+ * It carries no user identity and is never sent to a browser.
  *
- * `@ima-jin/auth-client` (<= 0.8.16) ships no helper for this mint — its
- * `requestAppToken` is the session-scoped user flow. Until it does, this module
- * is the single place the call lives; the Ed25519 signature itself comes from
- * the SDK's `signBootstrapPayload`, no crypto is implemented here.
+ * This module preserves coffee's mint error classification and shared cache.
+ * Ed25519 signing uses the published SDK's `signBootstrapPayload`; a future
+ * auth-client migration can replace the mint without changing event callers.
  */
 
 /** The operator-approved service scope that lets this app checkout + settle. */
@@ -70,6 +69,8 @@ async function mint(): Promise<CachedToken> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ appDid, nonce, timestamp, signature }),
+    signal: AbortSignal.timeout(5_000),
+    redirect: 'error',
   });
 
   if (!res.ok) {

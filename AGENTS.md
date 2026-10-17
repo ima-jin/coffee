@@ -210,7 +210,7 @@ Full text: `ima-jin/conventions/ISSUE-CONVENTIONS.md`. This §7 is kept in sync 
   settlement — coffee never calls `/pay/api/settle` for it (the kernel refuses with 409). An owner with no connected key
   gets `SELLER_NO_CARD_RAIL` (`src/lib/card-rail.ts`): `/api/tip` answers a plain 400 and the form hides the card option
   (ima-jin/imajin-ai#2773). Coffee has no e-Transfer path; Solana is offered where the page enabled it.
-- **Domain events it emits (via kernel API):** none yet — the kernel version's `tip.granted`/`tip.sent` bus events have no app-callable API (gap, ima-jin/imajin-ai#2641).
+- **Domain events it emits (via kernel API):** `tip.granted` / `tip.sent` through `POST /api/events` with coffee's app-service token. Declared in `imajin.app.json`; operator approval is required per environment. Notify and audit only, never settlement or attestations. See `docs/ARCHITECTURE.md`.
 - **Connectors it consumes:** _<not wired yet — later migration steps>_
 - **Scope guardrails specific to this app:** no access to kernel schemas or tables; kernel data (identity,
   profile, media, settlement) only via the kernel's public API and published `@ima-jin/*` packages.
