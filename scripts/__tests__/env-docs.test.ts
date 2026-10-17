@@ -37,10 +37,10 @@ function envNamesIn(source: string): string[] {
 
 describe('env contract coverage', () => {
   const manifest = new Set(ENV_VAR_NAMES);
-  it('pins both published auth SDK dependencies exactly to 0.8.18', () => {
+  it('pins the published auth SDK dependencies to their adopted versions', () => {
     const { dependencies } = JSON.parse(read('package.json')) as { dependencies: Record<string, string> };
     expect(dependencies['@ima-jin/auth']).toBe('0.8.18');
-    expect(dependencies['@ima-jin/auth-client']).toBe('0.8.18');
+    expect(dependencies['@ima-jin/auth-client']).toBe('0.8.21');
   });
 
   it('puts the per-environment sealed-secret prerequisite before the deploy commands', () => {
