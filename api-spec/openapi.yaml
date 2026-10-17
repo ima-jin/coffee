@@ -541,8 +541,13 @@ paths:
   /api/checkout:
     post:
       operationId: coffeeCheckout
-      summary: Create Stripe checkout for one-time or recurring support (no specific page)
-      description: "Public reversible proposal: the payer authorizes payment in Stripe. Optional authentication never downgrades a forbidden delegate to anonymous."
+      summary: Create Stripe checkout for support of a coffee page owner
+      description: >-
+        Public reversible proposal: the payer authorizes payment in Stripe.
+        The server resolves sellerDid from the stored pageHandle owner; client seller fields are ignored.
+        Every pay call uses coffee's app-service Bearer. Token-mint failure returns 503 without contacting pay.
+        Optional payer authentication never downgrades a forbidden delegate to anonymous.
+        Recurring support is forwarded as a subscription proposal and remains subject to the seller's card-rail support.
       tags: [coffee]
       security:
         - cookieAuth: []
@@ -554,9 +559,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [amount]
+              required: [pageHandle, amount]
               properties:
-                amount: { type: integer, description: "Amount in cents (minimum 500)" }
+                pageHandle: { type: string, minLength: 1, description: "Handle of a public coffee page; its stored owner is the seller" }
+                amount: { type: integer, minimum: 500, maximum: 9007199254740991, description: "Safe integer amount in cents (minimum $5)" }
                 recurring: { type: boolean }
                 joinMailingList: { type: boolean }
       responses:
@@ -569,12 +575,17 @@ paths:
                 properties:
                   url: { type: string }
         "400":
-          description: Amount below minimum
+          description: Missing/invalid page handle or amount is not safe integer cents at or above $5
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "403":
-          description: Supplied delegation is not authorized
+          description: Page is private or supplied delegation is not authorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Coffee page not found
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

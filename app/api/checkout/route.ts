@@ -87,15 +87,14 @@ export async function POST(request: NextRequest) {
     });
 
     if (!payRes.ok) {
-      const err = await payRes.text();
-      log.error({ err }, 'Pay service checkout failed');
+      log.error({ status: payRes.status }, 'Pay service checkout failed');
       return NextResponse.json({ error: 'Failed to create checkout' }, { status: 500 });
     }
 
     const payData = await payRes.json();
     return NextResponse.json({ url: payData.url });
-  } catch (error) {
-    log.error({ err: String(error) }, 'Checkout error');
+  } catch {
+    log.error({}, 'Checkout error');
     return NextResponse.json({ error: 'Failed to create checkout' }, { status: 500 });
   }
 }
