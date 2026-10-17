@@ -60,6 +60,16 @@ describe('POST /api/checkout', () => {
     expect(JSON.parse(mocks.fetchMock.mock.calls[0][1].body).sellerDid).toBe(PAGE.did);
   });
 
+  it('uses the resolved owner of a different page, not a fixed seller or the payer', async () => {
+    mocks.findFirstMock.mockResolvedValue({ ...PAGE, handle: 'another-page', did: 'did:imajin:another-owner' });
+    mocks.authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:payer', via: 'cookie', scopes: [] } });
+
+    const res = await POST(makeRequest({ ...VALID_BODY, pageHandle: 'another-page', sellerDid: 'did:imajin:attacker' }));
+
+    expect(res.status).toBe(200);
+    expect(JSON.parse(mocks.fetchMock.mock.calls[0][1].body).sellerDid).toBe('did:imajin:another-owner');
+  });
+
   it.each([403, 503])('does not downgrade an auth failure (%s) to anonymous checkout', async (status) => {
     mocks.authenticateMock.mockResolvedValue({ error: 'Auth refused', status });
     const res = await POST(makeRequest(VALID_BODY));
@@ -160,16 +170,16 @@ describe('POST /api/checkout', () => {
     expect(mocks.fetchMock).not.toHaveBeenCalled();
   });
 
-  it('fails closed with 503 on mint failure without logging mint details, then allows a retry', async () => {
+  it.each([false, true])('fails closed on mint failure without logging details, then allows a retry (recurring=%s)', async (recurring) => {
     mocks.getAppServiceTokenMock.mockRejectedValueOnce(new Error('private mint diagnostic'));
-    const res = await POST(makeRequest(VALID_BODY));
+    const res = await POST(makeRequest({ ...VALID_BODY, recurring }));
 
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ error: 'Payment service unavailable; please retry checkout' });
     expect(mocks.fetchMock).not.toHaveBeenCalled();
     expect(mocks.logErrorMock).not.toHaveBeenCalled();
 
-    const retry = await POST(makeRequest(VALID_BODY));
+    const retry = await POST(makeRequest({ ...VALID_BODY, recurring }));
     expect(retry.status).toBe(200);
     expect(mocks.fetchMock).toHaveBeenCalledOnce();
     expect(mocks.fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer test-app-service-token');
@@ -225,12 +235,14 @@ describe('POST /api/checkout', () => {
   });
 
   it('returns 500 without leaking upstream details when pay refuses', async () => {
-    mocks.fetchMock.mockResolvedValue({ ok: false, text: async () => 'Stripe error' });
+    mocks.fetchMock.mockResolvedValue({ ok: false, status: 401, text: async () => 'private upstream diagnostic' });
 
     const res = await POST(makeRequest(VALID_BODY));
 
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ error: 'Failed to create checkout' });
+    expect(mocks.fetchMock).toHaveBeenCalledOnce();
+    expect(mocks.logErrorMock).toHaveBeenCalledWith({ status: 401 }, 'Pay service checkout failed');
   });
 
   it('returns 500 when the body cannot be parsed', async () => {

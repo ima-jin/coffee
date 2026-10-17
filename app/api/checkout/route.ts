@@ -14,6 +14,17 @@ import { getAppServiceToken } from '@/lib/app-service-token';
 
 const log = createLogger('coffee');
 
+function supportItem(amount: number, recurring: boolean) {
+  return {
+    name: recurring ? 'Support Imajin (Monthly)' : 'Support Imajin',
+    description: recurring
+      ? 'Monthly support for sovereign infrastructure development'
+      : 'One-time support for sovereign infrastructure development',
+    amount,
+    quantity: 1,
+  };
+}
+
 export async function POST(request: NextRequest) {
   const ip = getClientIP(request);
   const rl = rateLimit(ip, 10, 60_000);
@@ -46,12 +57,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'This page is not accepting support' }, { status: 403 });
     }
 
-    let appToken: string;
-    try {
-      appToken = await getAppServiceToken();
-    } catch {
-      return NextResponse.json({ error: 'Payment service unavailable; please retry checkout' }, { status: 503 });
-    }
+    const appToken = await getAppServiceToken().catch(() => null);
     if (!appToken) {
       return NextResponse.json({ error: 'Payment service unavailable; please retry checkout' }, { status: 503 });
     }
@@ -69,16 +75,7 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify({
         sellerDid: page.did,
         mode: recurring ? 'subscription' : 'payment',
-        items: [
-          {
-            name: recurring ? 'Support Imajin (Monthly)' : 'Support Imajin',
-            description: recurring
-              ? 'Monthly support for sovereign infrastructure development'
-              : 'One-time support for sovereign infrastructure development',
-            amount,
-            quantity: 1,
-          },
-        ],
+        items: [supportItem(amount, recurring)],
         currency: 'USD',
         successUrl: `${baseUrl}/success?type=${recurring ? 'subscription' : 'onetime'}`,
         cancelUrl: baseUrl,
