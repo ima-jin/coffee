@@ -6,7 +6,8 @@ const { readKeystoreMock, resolveKeystorePathMock } = vi.hoisted(() => ({
   resolveKeystorePathMock: vi.fn(() => '/tmp/keystore.json'),
 }));
 
-vi.mock('@ima-jin/auth-client', () => ({
+vi.mock('@ima-jin/auth-client', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@ima-jin/auth-client')>(),
   readKeystore: readKeystoreMock,
   resolveKeystorePath: resolveKeystorePathMock,
 }));
@@ -70,6 +71,74 @@ describe('middleware', () => {
     const dashboard = await middlewareFor('/dashboard', { claimed: false });
     expect(dashboard.headers.get('location')).toBeNull();
     expect((await dashboard.text()).toLowerCase()).toContain('not claimed yet');
+  });
+});
+
+describe.each([false, true])('root auth callback forwarding (claimed: %s)', (claimed) => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    readKeystoreMock.mockReset();
+    resolveKeystorePathMock.mockClear();
+  });
+
+  it.each([
+    { basePath: '', root: '/' },
+    { basePath: '/coffee', root: '/coffee' },
+    { basePath: '/coffee', root: '/coffee/' },
+  ])('forwards the $root root before reading the keystore', async ({ basePath, root }) => {
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', `https://app.example${basePath}`);
+    const { middleware } = await import('../middleware');
+    readKeystoreMock.mockReturnValue(claimed ? {} : null);
+    const query = '?attestation_id=test-attestation&user_did=did%3Aimajin%3Aalice&state=preserved';
+    const request = new NextRequest(`https://app.example${root}${query}`, {
+      nextConfig: { basePath },
+    });
+
+    const response = middleware(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toBe(`https://app.example${basePath}/api/auth/callback${query}`);
+    expect(readKeystoreMock).not.toHaveBeenCalled();
+    expect(resolveKeystorePathMock).not.toHaveBeenCalled();
+  });
+  it('uses the Next.js basePath when no public URL is configured', async () => {
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', '');
+    const { middleware } = await import('../middleware');
+    readKeystoreMock.mockReturnValue(claimed ? {} : null);
+    const query = '?attestation_id=test-attestation&user_did=did%3Aimajin%3Aalice';
+    const response = middleware(new NextRequest(`https://app.example/coffee${query}`, {
+      nextConfig: { basePath: '/coffee' },
+    }));
+
+    expect(response.headers.get('location')).toBe(`https://app.example/coffee/api/auth/callback${query}`);
+    expect(readKeystoreMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['', '?attestation_id=test-attestation', '?user_did=did:imajin:alice', '?attestation_id=&user_did=did:imajin:alice'])(
+    'keeps the existing root behavior without complete callback params: %s',
+    async (query) => {
+      vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://app.example/coffee');
+      const { middleware } = await import('../middleware');
+      readKeystoreMock.mockReturnValue(claimed ? {} : null);
+      const response = middleware(new NextRequest(`https://app.example/coffee${query}`, {
+        nextConfig: { basePath: '/coffee' },
+      }));
+
+      expect(response.headers.get('location')).toBeNull();
+      expect(readKeystoreMock).toHaveBeenCalledOnce();
+      if (claimed) {
+        expect(response.headers.get('x-middleware-next')).toBe('1');
+      } else {
+        expect(await response.text()).toContain('Not claimed yet');
+      }
+    },
+  );
+
+  it('does not forward callback params on a non-root page', async () => {
+    const response = await middlewareFor('/other?attestation_id=test-attestation&user_did=did:imajin:alice', { claimed });
+
+    expect(response.headers.get('location')).toBeNull();
+    expect(readKeystoreMock).toHaveBeenCalledOnce();
   });
 });
 
