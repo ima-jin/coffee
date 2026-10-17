@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createLogger } from '@ima-jin/logger';
 import { rateLimit, getClientIP } from '@ima-jin/config';
 import { payServiceUrl, publicAppUrl } from '@/lib/env';
+import { optionalAuthenticate, authErrorResponse } from '@/lib/auth/authenticate';
 
 const log = createLogger('coffee');
 
@@ -22,6 +23,8 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const authResult = await optionalAuthenticate(request);
+    if ('error' in authResult) return authErrorResponse(authResult);
     const { amount, recurring, joinMailingList } = await request.json();
 
     if (!amount || amount < 500) {

@@ -19,9 +19,12 @@ vi.mock('@/db', () => ({
   db: { query: { coffeePages: { findFirst: mocks.findFirstMock } }, insert: mocks.insertMock },
   coffeePages: {},
 }));
-vi.mock('@/lib/auth/authenticate', () => ({ authenticate: mocks.authenticateMock }));
+vi.mock('@ima-jin/auth', () => ({ requireSessionOrAppToken: mocks.authenticateMock }));
+vi.mock('@ima-jin/auth-client', () => ({ getSession: vi.fn().mockResolvedValue(null) }));
+vi.mock('@/lib/auth-config', () => ({ authConfig: {} }));
 
 import { POST } from '../route';
+import { evaluateDelegationPolicy } from '@ima-jin/auth/delegation-policy';
 
 function makeRequest(body: unknown): Parameters<typeof POST>[0] {
   return new Request('https://coffee.test/api/pages', {
@@ -46,6 +49,21 @@ beforeEach(() => {
 });
 
 describe('POST /api/pages', () => {
+  it.each(['token', 'cookie'])('returns the full SDK proposal before DB/config calls for a %s delegate', async (via) => {
+    mocks.authenticateMock.mockResolvedValue({
+      auth: { did: 'did:imajin:agent', actingFor: 'did:imajin:creator', scopes: [], via },
+    });
+    const decision = evaluateDelegationPolicy({ id: 'did:imajin:agent', actingFor: 'did:imajin:creator' }, {
+      action: 'create', class: 'value-moving',
+    });
+    if (decision.allowed) throw new Error('Expected SDK proposal');
+    const res = await POST(makeRequest({ ...VALID_BODY, approved: true, ownerCountersigned: true }));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual(decision.body);
+    expect(mocks.findFirstMock).not.toHaveBeenCalled();
+    expect(mocks.getNodeSelfMock).not.toHaveBeenCalled();
+    expect(mocks.insertMock).not.toHaveBeenCalled();
+  });
   it('returns the auth failure when unauthenticated', async () => {
     mocks.authenticateMock.mockResolvedValue({ error: 'Authorization required', status: 401 });
 

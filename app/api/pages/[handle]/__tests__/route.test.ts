@@ -27,9 +27,12 @@ vi.mock('@/db', () => ({
   },
   coffeePages: { id: 'id-column' },
 }));
-vi.mock('@/lib/auth/authenticate', () => ({ authenticate: mocks.authenticateMock }));
+vi.mock('@ima-jin/auth', () => ({ requireSessionOrAppToken: mocks.authenticateMock }));
+vi.mock('@ima-jin/auth-client', () => ({ getSession: vi.fn().mockResolvedValue(null) }));
+vi.mock('@/lib/auth-config', () => ({ authConfig: {} }));
 
 import { DELETE, GET, PUT } from '../route';
+import { evaluateDelegationPolicy } from '@ima-jin/auth/delegation-policy';
 
 const PROPS = { params: Promise.resolve({ handle: 'creator' }) };
 const PAGE = { id: 'page_1', did: 'did:imajin:creator', handle: 'creator', isPublic: true, title: 'Creator' };
@@ -82,6 +85,46 @@ describe('GET /api/pages/:handle', () => {
 });
 
 describe('PUT /api/pages/:handle', () => {
+  it.each([
+    { paymentMethods: { solana: { address: 'new-address' } } },
+    { paymentMethods: null, title: 'Mixed' },
+    { isPublic: true },
+    { isPublic: false },
+  ])('blocks sensitive delegate updates before DB access (%j)', async (body) => {
+    for (const via of ['token', 'cookie']) {
+      mocks.authenticateMock.mockResolvedValue({
+        auth: { did: 'did:imajin:agent', actingFor: PAGE.did, scopes: [], via },
+      });
+      const mutation = 'paymentMethods' in body
+        ? { action: 'payment-methods-update', class: 'value-moving' as const }
+        : { action: 'visibility-update', class: 'irreversible' as const };
+      const decision = evaluateDelegationPolicy({ id: 'did:imajin:agent', actingFor: PAGE.did }, { ...mutation, resourceId: 'creator' });
+      if (decision.allowed) throw new Error('Expected SDK proposal');
+      const res = await PUT(makeRequest('PUT', { ...body, approved: true }), PROPS);
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual(decision.body);
+      expect(mocks.findFirstMock).not.toHaveBeenCalled();
+      expect(mocks.updateMock).not.toHaveBeenCalled();
+    }
+  });
+
+  it('does not promote a delegate into the page owner even for reversible details', async () => {
+    mocks.authenticateMock.mockResolvedValue({
+      auth: { did: 'did:imajin:agent', actingFor: PAGE.did, scopes: [], via: 'token' },
+    });
+    const res = await PUT(makeRequest('PUT', { title: 'Draft' }), PROPS);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'Not authorized to update this page' });
+    expect(mocks.updateMock).not.toHaveBeenCalled();
+  });
+
+  it('allows reversible edits to the caller own page without resolving actingFor', async () => {
+    mocks.authenticateMock.mockResolvedValue({
+      auth: { did: PAGE.did, actingFor: 'did:imajin:other-owner', scopes: [], via: 'cookie' },
+    });
+    expect((await PUT(makeRequest('PUT', { title: 'Updated' }), PROPS)).status).toBe(200);
+    expect(mocks.updateMock).toHaveBeenCalledOnce();
+  });
   it('requires authentication', async () => {
     mocks.authenticateMock.mockResolvedValue({ error: 'Authorization required', status: 401 });
 
@@ -165,22 +208,19 @@ describe('DELETE /api/pages/:handle', () => {
     expect(mocks.deleteMock).not.toHaveBeenCalled();
   });
 
-  it('refuses a delegate with the owner-countersign 403 and deletes nothing (#2360)', async () => {
+  it.each(['token', 'cookie'])('refuses a %s delegate with the complete owner-countersign 403 and deletes nothing (#2360)', async (via) => {
     mocks.authenticateMock.mockResolvedValue({
-      auth: { did: 'did:imajin:agent', actingFor: 'did:imajin:creator', scopes: [], via: 'token' },
+      auth: { did: 'did:imajin:agent', actingFor: 'did:imajin:creator', scopes: [], via },
     });
 
     const res = await DELETE(makeRequest('DELETE'), PROPS);
 
     expect(res.status).toBe(403);
-    expect(await res.json()).toMatchObject({
-      code: 'AGENT_APPROVAL_REQUIRED',
-      action: 'delete',
-      class: 'irreversible',
-      resourceId: 'creator',
-      ownerDid: 'did:imajin:creator',
-      delegateDid: 'did:imajin:agent',
+    const decision = evaluateDelegationPolicy({ id: 'did:imajin:agent', actingFor: PAGE.did }, {
+      action: 'delete', class: 'irreversible', resourceId: 'creator',
     });
+    if (decision.allowed) throw new Error('Expected SDK proposal');
+    expect(await res.json()).toEqual(decision.body);
     expect(mocks.findFirstMock).not.toHaveBeenCalled();
     expect(mocks.deleteMock).not.toHaveBeenCalled();
   });

@@ -100,6 +100,20 @@ components:
       properties:
         error: { type: string }
 
+    DelegationProposal:
+      type: object
+      required: [error, code, action, class, ownerDid]
+      description: "The published SDK proposal. The owner must reissue from their own session; delegate approval flags grant no authority."
+      properties:
+        error: { type: string }
+        code: { type: string, enum: [AGENT_APPROVAL_REQUIRED] }
+        action: { type: string }
+        class: { type: string, enum: [reversible, value-moving, irreversible] }
+        resourceId: { type: string }
+        ownerDid: { type: string }
+        delegateDid: { type: string }
+        gatedUntil: { type: string }
+
 paths:
   /api/health:
     get:
@@ -192,6 +206,7 @@ paths:
     post:
       operationId: createCoffeePage
       summary: Create a tip page — one per DID
+      description: "Value-moving: establishes payment destinations and .fair attribution. Delegates receive an owner-countersign proposal."
       tags: [coffee]
       security:
         - cookieAuth: []
@@ -231,6 +246,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Delegation requires the owner's countersign
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DelegationProposal" }
         "409":
           description: Page or handle already exists
           content:
@@ -306,6 +326,7 @@ paths:
     put:
       operationId: updateCoffeePage
       summary: Update tip page (owner only)
+      description: "Ordinary details are reversible. paymentMethods writes are value-moving; isPublic writes are irreversible (disclosure). Both require owner countersign for delegates."
       tags: [coffee]
       security:
         - cookieAuth: []
@@ -345,10 +366,13 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "403":
-          description: Not the page owner
+          description: Not the page owner, or delegation requires owner countersign
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Error" }
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/Error" }
+                  - { $ref: "#/components/schemas/DelegationProposal" }
         "404":
           description: Not found
           content:
@@ -362,6 +386,7 @@ paths:
     delete:
       operationId: deleteCoffeePage
       summary: Delete tip page (owner only)
+      description: "Irreversible. Delegates receive the complete SDK owner-countersign proposal before database access."
       tags: [coffee]
       security:
         - cookieAuth: []
@@ -386,10 +411,13 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "403":
-          description: Not the page owner
+          description: Not the page owner, or delegation requires owner countersign
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Error" }
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/Error" }
+                  - { $ref: "#/components/schemas/DelegationProposal" }
         "404":
           description: Not found
           content:
@@ -472,12 +500,17 @@ paths:
                     enum: [SELLER_NO_CARD_RAIL, SUBSCRIPTION_NOT_SUPPORTED]
                     description: "Present for a card-rail refusal; the form hides the card option on SELLER_NO_CARD_RAIL."
         "403":
-          description: Page is private (not accepting tips)
+          description: Page is private (not accepting tips), or supplied delegation is not authorized
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "404":
           description: Coffee page not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: Authentication service unavailable
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -509,7 +542,12 @@ paths:
     post:
       operationId: coffeeCheckout
       summary: Create Stripe checkout for one-time or recurring support (no specific page)
+      description: "Public reversible proposal: the payer authorizes payment in Stripe. Optional authentication never downgrades a forbidden delegate to anonymous."
       tags: [coffee]
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+        - {}
       requestBody:
         required: true
         content:
@@ -532,6 +570,16 @@ paths:
                   url: { type: string }
         "400":
           description: Amount below minimum
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Supplied delegation is not authorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: Authentication service unavailable
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

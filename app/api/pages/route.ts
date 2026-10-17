@@ -3,7 +3,7 @@ import { createLogger } from '@ima-jin/logger';
 import { getNodeSelf } from '@ima-jin/config';
 import { buildFairManifest } from '@ima-jin/fair';
 import { db, coffeePages } from '@/db';
-import { authenticate } from '@/lib/auth/authenticate';
+import { authenticate, authErrorResponse } from '@/lib/auth/authenticate';
 import { jsonResponse, errorResponse, isValidHandle, generateId } from '@/lib/utils';
 
 const log = createLogger('coffee');
@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
   // Require authentication (scoped app token, or session cookie fallback)
   const authResult = await authenticate(request);
   if ('error' in authResult) {
-    return errorResponse(authResult.error, authResult.status);
+    return authErrorResponse(authResult);
   }
 
   const did = authResult.auth.did;

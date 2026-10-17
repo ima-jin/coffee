@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => {
     insertMock: vi.fn(() => ({ values: valuesMock })),
     findFirstMock: vi.fn(),
     rateLimitMock: vi.fn(),
-    optionalCallerDidMock: vi.fn(),
+    authenticateMock: vi.fn(),
     fetchMock: vi.fn(),
     getAppServiceTokenMock: vi.fn(),
   };
@@ -20,7 +20,9 @@ vi.mock('@/db', () => ({
   tips: {},
 }));
 vi.mock('@/lib/app-service-token', () => ({ getAppServiceToken: mocks.getAppServiceTokenMock }));
-vi.mock('@/lib/auth/authenticate', () => ({ optionalCallerDid: mocks.optionalCallerDidMock }));
+vi.mock('@ima-jin/auth', () => ({ requireSessionOrAppToken: mocks.authenticateMock }));
+vi.mock('@ima-jin/auth-client', () => ({ getSession: vi.fn().mockResolvedValue(null) }));
+vi.mock('@/lib/auth-config', () => ({ authConfig: {} }));
 
 import { POST } from '../route';
 
@@ -51,7 +53,7 @@ beforeEach(() => {
   vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://coffee.test');
   vi.stubEnv('NEXT_PUBLIC_BASE_PATH', '');
   mocks.rateLimitMock.mockReturnValue({ limited: false, retryAfter: 0 });
-  mocks.optionalCallerDidMock.mockResolvedValue(null);
+  mocks.authenticateMock.mockResolvedValue({ error: 'Not authenticated', status: 401 });
   mocks.valuesMock.mockResolvedValue(undefined);
   mocks.findFirstMock.mockResolvedValue(PAGE);
   mocks.getAppServiceTokenMock.mockResolvedValue('app-service-token');
@@ -69,6 +71,39 @@ const EXPECTED_MANIFEST = {
 };
 
 describe('POST /api/tip — guards', () => {
+  it.each([403, 503])('does not downgrade an auth failure (%s) into an anonymous tip', async (status) => {
+    mocks.authenticateMock.mockResolvedValue({ error: 'Auth refused', status });
+    const res = await POST(makeRequest(STRIPE_BODY));
+    expect(res.status).toBe(status);
+    expect(await res.json()).toEqual({ error: 'Auth refused' });
+    expect(mocks.findFirstMock).not.toHaveBeenCalled();
+    expect(mocks.insertMock).not.toHaveBeenCalled();
+    expect(mocks.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('fails closed before side effects when the handler is invoked at an unclassified delegated path', async () => {
+    mocks.authenticateMock.mockResolvedValue({
+      auth: { did: 'did:imajin:agent', actingFor: 'did:imajin:fan', scopes: [], via: 'token' },
+    });
+    const req = new Request('https://coffee.test/api/future', { method: 'POST', body: JSON.stringify(STRIPE_BODY) });
+    const res = await POST(req as Parameters<typeof POST>[0]);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'AGENT_APPROVAL_REQUIRED', action: 'unclassified-mutation', ownerDid: 'did:imajin:fan' });
+    expect(mocks.findFirstMock).not.toHaveBeenCalled();
+    expect(mocks.insertMock).not.toHaveBeenCalled();
+    expect(mocks.getAppServiceTokenMock).not.toHaveBeenCalled();
+    expect(mocks.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['stripe', 'solana'])('allows a delegated %s proposal but only creates a pending tip attributed to the caller', async (paymentMethod) => {
+    mocks.authenticateMock.mockResolvedValue({
+      auth: { did: 'did:imajin:agent', actingFor: 'did:imajin:fan', scopes: [], via: 'cookie' },
+    });
+    const res = await POST(makeRequest({ ...STRIPE_BODY, paymentMethod }));
+    expect(res.status).toBe(200);
+    expect(mocks.valuesMock).toHaveBeenCalledWith(expect.objectContaining({ fromDid: 'did:imajin:agent', status: 'pending' }));
+    for (const [url] of mocks.fetchMock.mock.calls) expect(url).toBe('https://kernel.test/pay/api/checkout');
+  });
   it('returns 429 when rate limited', async () => {
     mocks.rateLimitMock.mockReturnValue({ limited: true, retryAfter: 15 });
 
@@ -216,7 +251,7 @@ describe('POST /api/tip — stripe', () => {
   });
 
   it('attributes the tip to an authenticated caller and supports monthly recurring tips', async () => {
-    mocks.optionalCallerDidMock.mockResolvedValue('did:imajin:fan');
+    mocks.authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:fan', scopes: [], via: 'token' } });
 
     const res = await POST(makeRequest({ ...STRIPE_BODY, recurring: true, currency: 'eur' }));
 
@@ -320,7 +355,7 @@ describe('POST /api/tip — solana', () => {
   const SOLANA_BODY = { pageHandle: 'creator', amount: 500, paymentMethod: 'solana' };
 
   it('records a pending SOL tip and returns the destination address without calling pay', async () => {
-    mocks.optionalCallerDidMock.mockResolvedValue('did:imajin:fan');
+    mocks.authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:fan', scopes: [], via: 'token' } });
 
     const res = await POST(makeRequest({ ...SOLANA_BODY, fromName: 'Sam', message: 'gm' }));
 

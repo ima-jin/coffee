@@ -1,9 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ rateLimitMock: vi.fn(), fetchMock: vi.fn() }));
+const mocks = vi.hoisted(() => ({ rateLimitMock: vi.fn(), fetchMock: vi.fn(), authenticateMock: vi.fn() }));
 
 vi.mock('@ima-jin/logger', () => ({ createLogger: () => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn() }) }));
 vi.mock('@ima-jin/config', () => ({ rateLimit: mocks.rateLimitMock, getClientIP: () => '127.0.0.1' }));
+
+vi.mock('@ima-jin/auth', () => ({ requireSessionOrAppToken: mocks.authenticateMock }));
+vi.mock('@ima-jin/auth-client', () => ({ getSession: vi.fn().mockResolvedValue(null) }));
+vi.mock('@/lib/auth-config', () => ({ authConfig: {} }));
 
 import { POST } from '../route';
 
@@ -19,6 +23,7 @@ const VALID_BODY = { amount: 1000, recurring: false, joinMailingList: false };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.authenticateMock.mockResolvedValue({ error: 'Not authenticated', status: 401 });
   vi.stubGlobal('fetch', mocks.fetchMock);
   vi.stubEnv('PAY_SERVICE_URL', 'https://kernel.test/pay');
   vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://coffee.test');
@@ -28,6 +33,35 @@ beforeEach(() => {
 });
 
 describe('POST /api/checkout', () => {
+  it.each(['token', 'cookie'])('allows a reversible hosted checkout proposal for a %s delegate', async (via) => {
+    mocks.authenticateMock.mockResolvedValue({
+      auth: { did: 'did:imajin:agent', actingFor: 'did:imajin:owner', scopes: [], via },
+    });
+    const res = await POST(makeRequest(VALID_BODY));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ url: 'https://checkout.test/session_1' });
+    expect(mocks.fetchMock).toHaveBeenCalledOnce();
+    expect(mocks.fetchMock.mock.calls[0][0]).toBe('https://kernel.test/pay/api/checkout');
+  });
+
+  it.each([403, 503])('does not downgrade an auth failure (%s) to anonymous checkout', async (status) => {
+    mocks.authenticateMock.mockResolvedValue({ error: 'Auth refused', status });
+    const res = await POST(makeRequest(VALID_BODY));
+    expect(res.status).toBe(status);
+    expect(await res.json()).toEqual({ error: 'Auth refused' });
+    expect(mocks.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('fails closed without calling pay for an unclassified delegated mutation', async () => {
+    mocks.authenticateMock.mockResolvedValue({
+      auth: { did: 'did:imajin:agent', actingFor: 'did:imajin:owner', scopes: [], via: 'token' },
+    });
+    const req = new Request('https://coffee.test/api/future', { method: 'POST', body: JSON.stringify(VALID_BODY) });
+    const res = await POST(req as Parameters<typeof POST>[0]);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'AGENT_APPROVAL_REQUIRED', action: 'unclassified-mutation' });
+    expect(mocks.fetchMock).not.toHaveBeenCalled();
+  });
   it('returns 429 with Retry-After when rate limited, without calling pay', async () => {
     mocks.rateLimitMock.mockReturnValue({ limited: true, retryAfter: 30 });
 
