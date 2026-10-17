@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => {
     updateMock: vi.fn(() => ({ set: setMock })),
     findTipMock: vi.fn(),
     settleTipMock: vi.fn(),
+    findPageMock: vi.fn(),
+    publishMock: vi.fn(),
     log: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
   };
 });
@@ -23,11 +25,12 @@ vi.mock('drizzle-orm', () => ({ eq: vi.fn((column: unknown, value: unknown) => (
 vi.mock('@/db', () => ({
   db: {
     update: mocks.updateMock,
-    query: { tips: { findFirst: mocks.findTipMock } },
+    query: { tips: { findFirst: mocks.findTipMock }, coffeePages: { findFirst: mocks.findPageMock } },
   },
   tips: { id: 'id-column' },
 }));
 vi.mock('@/lib/settle', () => ({ settleTip: mocks.settleTipMock }));
+vi.mock('@/lib/domain-events', () => ({ publishDomainEvent: mocks.publishMock }));
 
 import { POST } from '../route';
 
@@ -63,7 +66,10 @@ const MANIFEST = {
   ],
 };
 
-const TIP = { id: 'tip_1', payTransactionId: 'tx_1', payeeManifest: MANIFEST, settledAt: null };
+const TIP = {
+  id: 'tip_1', pageId: 'page_1', fromDid: 'did:imajin:fan', fromName: 'Sam',
+  amount: 500, currency: 'USD', payTransactionId: 'tx_1', payeeManifest: MANIFEST, settledAt: null,
+};
 
 function makeRequest(body: unknown, options: {
   timestampOffsetSeconds?: number;
@@ -106,6 +112,7 @@ function expectNoSideEffects(): void {
   expect(mocks.updateMock).not.toHaveBeenCalled();
   expect(mocks.findTipMock).not.toHaveBeenCalled();
   expect(mocks.settleTipMock).not.toHaveBeenCalled();
+  expect(mocks.publishMock).not.toHaveBeenCalled();
   expect(mocks.log.info).not.toHaveBeenCalled();
   expect(mocks.log.warn).not.toHaveBeenCalled();
   expect(mocks.log.error).not.toHaveBeenCalled();
@@ -131,6 +138,8 @@ beforeEach(() => {
   mocks.whereMock.mockResolvedValue(undefined);
   mocks.findTipMock.mockResolvedValue({ ...TIP });
   mocks.settleTipMock.mockResolvedValue('settled');
+  mocks.findPageMock.mockResolvedValue({ did: 'did:imajin:creator', title: 'Creator' });
+  mocks.publishMock.mockResolvedValue(true);
 });
 
 describe('POST /api/webhook/payment — authentication', () => {
@@ -238,6 +247,65 @@ describe('POST /api/webhook/payment — authentication', () => {
 });
 
 describe('POST /api/webhook/payment — events', () => {
+  it.each(['payment.succeeded', 'checkout.completed'])('emits both notifications after %s commits, using stored identities and amounts', async (type) => {
+    mocks.publishMock.mockImplementation(async () => {
+      expect(mocks.whereMock).toHaveBeenCalledWith({ column: 'id-column', value: 'tip_1' });
+      expect(mocks.setMock).toHaveBeenCalledWith({ status: 'completed' });
+      return true;
+    });
+    const response = await POST(makeRequest({ type, tipId: 'tip_1', fromDid: 'did:imajin:forged', amount: 999 }));
+    expect(await response.json()).toEqual({ received: true });
+    const payload = { amount: 500, currency: 'USD', context_id: 'tip_1', context_type: 'coffee', status: 'completed' };
+    expect(mocks.publishMock).toHaveBeenNthCalledWith(1, {
+      type: 'tip.granted', subject: 'did:imajin:creator', correlationId: 'tip_1',
+      payload: { ...payload, interestDids: ['did:imajin:creator'], tipperName: 'Sam' },
+    });
+    expect(mocks.publishMock).toHaveBeenNthCalledWith(2, {
+      type: 'tip.sent', subject: 'did:imajin:fan', correlationId: 'tip_1',
+      payload: { ...payload, interestDids: ['did:imajin:fan'], pageName: 'Creator' },
+    });
+  });
+
+  it('notifies only the recipient for an anonymous completed tip', async () => {
+    mocks.findTipMock.mockResolvedValue({ ...TIP, fromDid: null, fromName: null });
+    await POST(makeRequest({ type: 'payment.succeeded', tipId: 'tip_1' }));
+    expect(mocks.publishMock).toHaveBeenCalledTimes(1);
+    expect(mocks.publishMock).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'tip.granted', payload: expect.objectContaining({ tipperName: 'Anonymous' }),
+    }));
+  });
+
+  it('still notifies the sender with a fallback name when the page is missing', async () => {
+    mocks.findPageMock.mockResolvedValue(undefined);
+    await POST(makeRequest({ type: 'payment.succeeded', tipId: 'tip_1' }));
+    expect(mocks.publishMock).toHaveBeenCalledTimes(1);
+    expect(mocks.publishMock).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'tip.sent', payload: expect.objectContaining({ pageName: 'a creator' }),
+    }));
+    expect(mocks.log.error).toHaveBeenCalled();
+  });
+
+  it('keeps acknowledgement and settlement when event delivery fails', async () => {
+    mocks.publishMock.mockResolvedValue(false);
+    const response = await POST(makeRequest({ type: 'payment.succeeded', tipId: 'tip_1' }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ received: true });
+    expect(mocks.settleTipMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps acknowledgement and settlement when page lookup fails', async () => {
+    mocks.findPageMock.mockRejectedValueOnce(new Error('sensitive-db-error'));
+    const response = await POST(makeRequest({ type: 'payment.succeeded', tipId: 'tip_1' }));
+    expect(response.status).toBe(200);
+    expect(mocks.settleTipMock).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain('sensitive-db-error');
+  });
+
+  it('does not emit on a failed completion write', async () => {
+    mocks.whereMock.mockRejectedValueOnce(new Error('db down'));
+    expect((await POST(makeRequest({ type: 'payment.succeeded', tipId: 'tip_1' }))).status).toBe(500);
+    expect(mocks.publishMock).not.toHaveBeenCalled();
+  });
   it('acknowledges events that are not about a tip', async () => {
     const res = await POST(makeRequest({ type: 'payment.succeeded' }));
 

@@ -7,6 +7,7 @@ import { cardRailFailure, payErrorCode } from '@/lib/card-rail';
 import { optionalAuthenticate, authErrorResponse } from '@/lib/auth/authenticate';
 import { payServiceUrl, publicAppUrl } from '@/lib/env';
 import { buildTipPayeeManifest } from '@/lib/tip-manifest';
+import { publishDomainEvent } from '@/lib/domain-events';
 import { jsonResponse, errorResponse, generateId } from '@/lib/utils';
 
 const log = createLogger('coffee');
@@ -156,7 +157,12 @@ async function createStripeTip(params: {
     payeeManifest,
     status: 'pending',
   });
-
+  if (fromDid) {
+    await publishDomainEvent({
+      type: 'tip.granted', subject: page.did, correlationId: tipId,
+      payload: { amount, currency, context_id: tipId, context_type: 'coffee', status: 'pending' },
+    });
+  }
   // Return checkout URL for redirect
   return jsonResponse({
     tipId,
@@ -191,6 +197,12 @@ async function createSolanaTip(params: {
     paymentId: 'pending',
     status: 'pending',
   });
+  if (fromDid) {
+    await publishDomainEvent({
+      type: 'tip.granted', subject: page.did, correlationId: tipId,
+      payload: { amount, currency: 'SOL', context_id: tipId, context_type: 'coffee', status: 'pending' },
+    });
+  }
 
   return jsonResponse({
     tipId,
@@ -206,9 +218,8 @@ async function createSolanaTip(params: {
  * Public: anonymous callers may tip. When the caller presents a scoped app
  * token (or a session), the tip is attributed to their DID.
  *
- * Note: the kernel version also published `tip.granted` to the in-process
- * event bus here. The bus is kernel-internal and has no public HTTP surface,
- * so this app does not emit it — see docs/ARCHITECTURE.md (gap(kernel)).
+ * Authenticated pending tips emit `tip.granted` through kernel `/api/events`
+ * after insertion. Event delivery is best-effort and never changes the response.
  *
  * Body:
  * - pageHandle: string (required)

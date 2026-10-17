@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
     authenticateMock: vi.fn(),
     fetchMock: vi.fn(),
     getAppServiceTokenMock: vi.fn(),
+    publishMock: vi.fn(),
   };
 });
 
@@ -23,6 +24,7 @@ vi.mock('@/lib/app-service-token', () => ({ getAppServiceToken: mocks.getAppServ
 vi.mock('@ima-jin/auth', () => ({ requireSessionOrAppToken: mocks.authenticateMock }));
 vi.mock('@ima-jin/auth-client', () => ({ getSession: vi.fn().mockResolvedValue(null) }));
 vi.mock('@/lib/auth-config', () => ({ authConfig: {} }));
+vi.mock('@/lib/domain-events', () => ({ publishDomainEvent: mocks.publishMock }));
 
 import { POST } from '../route';
 
@@ -57,6 +59,7 @@ beforeEach(() => {
   mocks.valuesMock.mockResolvedValue(undefined);
   mocks.findFirstMock.mockResolvedValue(PAGE);
   mocks.getAppServiceTokenMock.mockResolvedValue('app-service-token');
+  mocks.publishMock.mockResolvedValue(true);
   mocks.fetchMock.mockResolvedValue({
     ok: true,
     json: async () => ({ id: 'cs_1', url: 'https://checkout.test/cs_1', transactionId: 'tx_1' }),
@@ -348,6 +351,56 @@ describe('POST /api/tip — stripe', () => {
 
     expect(res.status).toBe(500);
     expect((await res.json()).error).toBe('Failed to process tip');
+  });
+});
+
+describe('POST /api/tip — domain events', () => {
+  it.each(['stripe', 'solana'])('publishes an authenticated %s pending tip only after insertion resolves', async (paymentMethod) => {
+    mocks.authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:fan', scopes: [], via: 'token' } });
+    const commit = Promise.withResolvers<void>();
+    mocks.valuesMock.mockReturnValueOnce(commit.promise);
+    const pending = POST(makeRequest({ ...STRIPE_BODY, paymentMethod }));
+    await vi.waitFor(() => expect(mocks.valuesMock).toHaveBeenCalled());
+    expect(mocks.publishMock).not.toHaveBeenCalled();
+    commit.resolve();
+    const response = await pending;
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(mocks.publishMock).toHaveBeenCalledTimes(1);
+    expect(mocks.publishMock).toHaveBeenCalledWith({
+      type: 'tip.granted', subject: PAGE.did, correlationId: body.tipId,
+      payload: { amount: 500, currency: paymentMethod === 'solana' ? 'SOL' : 'USD',
+        context_id: body.tipId, context_type: 'coffee', status: 'pending' },
+    });
+  });
+
+  it.each(['stripe', 'solana'])('does not emit for anonymous %s initiation', async (paymentMethod) => {
+    await POST(makeRequest({ ...STRIPE_BODY, paymentMethod }));
+    expect(mocks.publishMock).not.toHaveBeenCalled();
+  });
+
+  it('does not emit when the database insert fails', async () => {
+    mocks.authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:fan', scopes: [], via: 'token' } });
+    mocks.valuesMock.mockRejectedValueOnce(new Error('db down'));
+    expect((await POST(makeRequest(STRIPE_BODY))).status).toBe(500);
+    expect(mocks.publishMock).not.toHaveBeenCalled();
+  });
+
+  it('does not emit when checkout is refused', async () => {
+    mocks.authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:fan', scopes: [], via: 'token' } });
+    mocks.fetchMock.mockResolvedValue({ ok: false, text: async () => 'unavailable' });
+    expect((await POST(makeRequest(STRIPE_BODY))).status).toBe(500);
+    expect(mocks.publishMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['stripe', 'solana'])('keeps the %s response when publication reports failure', async (paymentMethod) => {
+    mocks.authenticateMock.mockResolvedValue({ auth: { did: 'did:imajin:fan', scopes: [], via: 'token' } });
+    mocks.publishMock.mockResolvedValue(false);
+    const response = await POST(makeRequest({ ...STRIPE_BODY, paymentMethod }));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(Object.keys(body).sort()).toEqual(paymentMethod === 'stripe'
+      ? ['paymentMethod', 'tipId', 'url'] : ['amount', 'paymentMethod', 'solanaAddress', 'tipId']);
   });
 });
 
